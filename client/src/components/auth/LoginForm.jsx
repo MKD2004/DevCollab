@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { login as loginApi, register as registerApi } from '../../api/auth';
-import { useAuth } from '../../hooks/useAuth';
+import { useAuth } from '../../hooks/useAuth.jsx';
 
 export default function LoginForm() {
   const { login } = useAuth();

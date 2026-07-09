@@ -1,5 +1,5 @@
 import MonacoEditor from '../components/editor/MonacoEditor';
-import { useAuth } from '../hooks/useAuth';
+import { useAuth } from '../hooks/useAuth.jsx';
 
 export default function Dashboard() {
   const { user, logout } = useAuth();
