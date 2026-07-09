@@ -37,6 +37,28 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /api/rooms/join/:code — find and auto-join a room by its join code
+// Must be before /:id so Express doesn't treat "join" as an ObjectId
+router.get('/join/:code', async (req, res) => {
+  try {
+    const room = await Room.findOne({
+      joinCode: req.params.code.toUpperCase(),
+    }).populate('ownerId', 'username');
+
+    if (!room) return res.status(404).json({ message: 'Invalid join code' });
+
+    const isMember = room.members.some((m) => m.toString() === req.user.id);
+    if (!isMember) {
+      room.members.push(req.user.id);
+      await room.save();
+    }
+
+    res.json({ room });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // GET /api/rooms/:id — get a room by ID; auto-join if not already a member
 router.get('/:id', async (req, res) => {
   try {

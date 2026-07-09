@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './hooks/useAuth.jsx';
 import LoginForm from './components/auth/LoginForm';
 import Dashboard from './pages/Dashboard';
@@ -6,6 +6,7 @@ import Room from './pages/Room';
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
+  const location = useLocation();
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-950">
@@ -13,13 +14,17 @@ function ProtectedRoute({ children }) {
       </div>
     );
   }
-  return user ? children : <Navigate to="/login" replace />;
+  // Save the intended destination so PublicRoute can restore it after login
+  return user ? children : <Navigate to="/login" state={{ from: location.pathname }} replace />;
 }
 
 function PublicRoute({ children }) {
   const { user, loading } = useAuth();
+  const location = useLocation();
   if (loading) return null;
-  return user ? <Navigate to="/" replace /> : children;
+  // After login, send the user back to where they were trying to go
+  const dest = location.state?.from || '/';
+  return user ? <Navigate to={dest} replace /> : children;
 }
 
 export default function App() {

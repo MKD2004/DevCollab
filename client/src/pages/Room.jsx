@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth.jsx';
 import { useSocket } from '../hooks/useSocket.js';
@@ -15,6 +15,14 @@ export default function Room() {
   const [room, setRoom] = useState(null);
   const [loadError, setLoadError] = useState('');
   const [presenceUsers, setPresenceUsers] = useState([]);
+  const [codeCopied, setCodeCopied] = useState(false);
+
+  const copyCode = useCallback(() => {
+    if (!room?.joinCode) return;
+    navigator.clipboard.writeText(room.joinCode);
+    setCodeCopied(true);
+    setTimeout(() => setCodeCopied(false), 2000);
+  }, [room]);
 
   // Fetch room metadata (auto-joins if not a member)
   useEffect(() => {
@@ -68,6 +76,15 @@ export default function Room() {
           </button>
           <span className="text-gray-600">/</span>
           <span className="text-white font-medium">{room?.name ?? '…'}</span>
+          {room?.joinCode && (
+            <button
+              onClick={copyCode}
+              title="Click to copy join code"
+              className="ml-2 font-mono text-xs tracking-widest bg-gray-800 hover:bg-gray-700 border border-gray-700 text-indigo-300 px-2 py-1 rounded transition-colors"
+            >
+              {codeCopied ? 'Copied!' : room.joinCode}
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-4">
           <span

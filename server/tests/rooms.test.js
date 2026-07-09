@@ -53,6 +53,7 @@ describe('POST /api/rooms', () => {
     expect(res.status).toBe(201);
     expect(res.body.room.name).toBe('My Room');
     expect(res.body.room.members).toHaveLength(1);
+    expect(res.body.room.joinCode).toMatch(/^[A-Z2-9]{6}$/);
   });
 
   it('rejects unauthenticated request', async () => {
@@ -159,6 +160,64 @@ describe('GET /api/rooms/:id', () => {
     const created = await createRoom(tokenA, 'Some Room');
     const roomId = created.body.room._id;
     const res = await request(app).get(`/api/rooms/${roomId}`);
+    expect(res.status).toBe(401);
+  });
+});
+
+// ─── GET /api/rooms/join/:code ────────────────────────────────────────────────
+
+describe('GET /api/rooms/join/:code', () => {
+  it('joins a room by its code and returns room data', async () => {
+    const tokenA = await registerAndLogin('l');
+    const tokenB = await registerAndLogin('m');
+    const created = await createRoom(tokenA, 'Code Room');
+    const { joinCode } = created.body.room;
+
+    const res = await request(app)
+      .get(`/api/rooms/join/${joinCode}`)
+      .set('Authorization', `Bearer ${tokenB}`);
+    expect(res.status).toBe(200);
+    expect(res.body.room.joinCode).toBe(joinCode);
+  });
+
+  it('is case-insensitive for the code', async () => {
+    const tokenA = await registerAndLogin('n');
+    const tokenB = await registerAndLogin('o');
+    const created = await createRoom(tokenA, 'Case Room');
+    const { joinCode } = created.body.room;
+
+    const res = await request(app)
+      .get(`/api/rooms/join/${joinCode.toLowerCase()}`)
+      .set('Authorization', `Bearer ${tokenB}`);
+    expect(res.status).toBe(200);
+  });
+
+  it('adds the joining user as a member', async () => {
+    const tokenA = await registerAndLogin('p');
+    const tokenB = await registerAndLogin('q');
+    const created = await createRoom(tokenA, 'Member Room');
+    const { joinCode } = created.body.room;
+
+    await request(app)
+      .get(`/api/rooms/join/${joinCode}`)
+      .set('Authorization', `Bearer ${tokenB}`);
+
+    const listRes = await request(app)
+      .get('/api/rooms')
+      .set('Authorization', `Bearer ${tokenB}`);
+    expect(listRes.body.rooms).toHaveLength(1);
+  });
+
+  it('returns 404 for an invalid code', async () => {
+    const token = await registerAndLogin('r');
+    const res = await request(app)
+      .get('/api/rooms/join/ZZZZZZ')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(404);
+  });
+
+  it('rejects unauthenticated request', async () => {
+    const res = await request(app).get('/api/rooms/join/ABCDEF');
     expect(res.status).toBe(401);
   });
 });
