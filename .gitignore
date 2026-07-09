@@ -57,3 +57,7 @@ desktop.ini
 # Misc
 .eslintcache
 *.tsbuildinfo
+
+# Local-only docs (never commit these)
+context.md
+DevCollab_Project_Plan.md
