@@ -56,6 +56,11 @@ export default function MonacoEditor({
 }) {
   const internalRef = useRef(null);
   const decorationsRef = useRef([]);
+  // Ref so the Monaco listener always calls the latest callback, not a stale closure
+  const onCursorChangeRef = useRef(onCursorChange);
+  useEffect(() => {
+    onCursorChangeRef.current = onCursorChange;
+  });
 
   const handleMount = (editor) => {
     internalRef.current = editor;
@@ -63,7 +68,7 @@ export default function MonacoEditor({
     injectCursorCSS();
 
     editor.onDidChangeCursorPosition((e) => {
-      onCursorChange?.({ lineNumber: e.position.lineNumber, column: e.position.column });
+      onCursorChangeRef.current?.({ lineNumber: e.position.lineNumber, column: e.position.column });
     });
   };
 
