@@ -49,8 +49,9 @@ users.forEach((user, i) => {
 export default function MonacoEditor({
   language,
   onLanguageChange,
-  onContentChange,
+  onLocalChange,
   onCursorChange,
+  onEditorReady,
   remoteCursors,
   editorRef,
 }) {
@@ -60,6 +61,10 @@ export default function MonacoEditor({
   const onCursorChangeRef = useRef(onCursorChange);
   useEffect(() => {
     onCursorChangeRef.current = onCursorChange;
+  });
+  const onLocalChangeRef = useRef(onLocalChange);
+  useEffect(() => {
+    onLocalChangeRef.current = onLocalChange;
   });
   // Ref so content-change re-renders (below) always redraw the latest cursors
   const remoteCursorsRef = useRef(remoteCursors);
@@ -104,13 +109,20 @@ export default function MonacoEditor({
       onCursorChangeRef.current?.({ lineNumber: e.position.lineNumber, column: e.position.column });
     });
 
-    // editor.setValue() (used to apply incoming code:sync/code:change content)
-    // replaces the whole buffer and drops every decoration on it, so remote
-    // cursor markers must be reapplied after any content change.
-    editor.onDidChangeModelContent(() => {
+    // editor.setValue() / executeEdits() (used to apply incoming code:sync/
+    // code:op content) drop every decoration on the model, so remote cursor
+    // markers must be reapplied after any content change. Also forward the
+    // raw event (with e.changes) up so Room.jsx can build an OT operation
+    // from it — Monaco doesn't distinguish local keystrokes from
+    // programmatic edits here, so the parent is responsible for ignoring
+    // changes it triggered itself (via an isRemote-style guard).
+    editor.onDidChangeModelContent((e) => {
       decorationsRef.current = [];
       applyDecorations();
+      onLocalChangeRef.current?.(e);
     });
+
+    onEditorReady?.();
   };
 
   // Apply remote cursor decorations whenever remoteCursors map changes
@@ -140,9 +152,8 @@ export default function MonacoEditor({
         <Editor
           height="100%"
           language={language}
-          defaultValue={DEFAULT_CODE}
+          defaultValue=""
           theme="vs-dark"
-          onChange={(v) => onContentChange?.(v ?? '')}
           onMount={handleMount}
           options={{
             fontSize: 14,

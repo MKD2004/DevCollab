@@ -5,9 +5,65 @@ import { useSocket } from '../hooks/useSocket.js';
 import { getRoom } from '../api/rooms';
 import MonacoEditor, { DEFAULT_CODE } from '../components/editor/MonacoEditor';
 import PresenceList from '../components/presence/PresenceList';
+import { TextOperation } from '../ot/TextOperation';
+import { OTClient } from '../ot/OTClient';
 
-const CONTENT_DEBOUNCE_MS = 200;
 const CURSOR_DEBOUNCE_MS = 50;
+// If no code:sync arrives this long after joining, we assume the room is
+// brand new (empty on the server) and seed it with the welcome starter code.
+const FRESH_ROOM_SEED_DELAY_MS = 400;
+
+// Builds a TextOperation from Monaco's onDidChangeModelContent event,
+// against `oldContent` (the document text as it was immediately before
+// this change — Monaco's rangeOffset/rangeLength are relative to that).
+function operationFromMonacoEvent(oldContent, changes) {
+  const sorted = [...changes].sort((a, b) => a.rangeOffset - b.rangeOffset);
+  const op = new TextOperation();
+  let cursor = 0;
+  for (const change of sorted) {
+    const gap = change.rangeOffset - cursor;
+    if (gap > 0) op.retain(gap);
+    if (change.rangeLength > 0) op.delete(change.rangeLength);
+    if (change.text) op.insert(change.text);
+    cursor = change.rangeOffset + change.rangeLength;
+  }
+  const remaining = oldContent.length - cursor;
+  if (remaining > 0) op.retain(remaining);
+  return op;
+}
+
+// Translates a TextOperation into Monaco edit operations (computed against
+// the model's current positions, i.e. before any of these edits are applied)
+// and executes them as a single atomic batch.
+function applyOperationToModel(editor, operation) {
+  const model = editor.getModel();
+  if (!model) return;
+  let offset = 0;
+  const edits = [];
+  for (const component of operation.ops) {
+    if (typeof component === 'number' && component > 0) {
+      offset += component;
+    } else if (typeof component === 'string') {
+      const pos = model.getPositionAt(offset);
+      edits.push({
+        range: { startLineNumber: pos.lineNumber, startColumn: pos.column, endLineNumber: pos.lineNumber, endColumn: pos.column },
+        text: component,
+        forceMoveMarkers: true,
+      });
+    } else if (typeof component === 'number' && component < 0) {
+      const n = -component;
+      const start = model.getPositionAt(offset);
+      const end = model.getPositionAt(offset + n);
+      edits.push({
+        range: { startLineNumber: start.lineNumber, startColumn: start.column, endLineNumber: end.lineNumber, endColumn: end.column },
+        text: '',
+        forceMoveMarkers: true,
+      });
+      offset += n;
+    }
+  }
+  if (edits.length > 0) editor.executeEdits('remote-ot', edits);
+}
 
 export default function Room() {
   const { roomId } = useParams();
@@ -25,8 +81,51 @@ export default function Room() {
 
   const editorRef = useRef(null);
   const isRemote = useRef(false);
-  const contentTimer = useRef(null);
   const cursorTimer = useRef(null);
+  // Mirrors the editor's true current content (including unconfirmed local
+  // edits) — used purely to compute correct baseLengths for outgoing ops.
+  const docRef = useRef('');
+  const otClientRef = useRef(new OTClient(0));
+  const syncedRef = useRef(false);
+  const seedTimer = useRef(null);
+  // Monaco's core bundle loads asynchronously and can easily take longer
+  // than the seed delay, so seeding/syncing must be gated on actual mount
+  // readiness rather than a blind timeout from when the socket connected.
+  const editorReadyRef = useRef(false);
+  const roomJoinedRef = useRef(false);
+
+  // Pushes whatever we currently know the document to be (docRef.current)
+  // into the editor without generating an outgoing operation. Safe to call
+  // any time — no-ops if the editor isn't mounted yet.
+  const pushCurrentContentToEditor = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    isRemote.current = true;
+    editor.setValue(docRef.current);
+    isRemote.current = false;
+  }, []);
+
+  const scheduleSeedIfReady = useCallback(() => {
+    if (!editorReadyRef.current || !roomJoinedRef.current || syncedRef.current) return;
+    clearTimeout(seedTimer.current);
+    seedTimer.current = setTimeout(() => {
+      if (syncedRef.current) return;
+      const editor = editorRef.current;
+      if (!editor) return;
+      syncedRef.current = true; // treat the seed itself as "settled" so a late sync doesn't also fire
+      editor.setValue(DEFAULT_CODE); // flows through as a normal local edit -> first code:op
+    }, FRESH_ROOM_SEED_DELAY_MS);
+  }, []);
+
+  const handleEditorReady = useCallback(() => {
+    editorReadyRef.current = true;
+    if (syncedRef.current) {
+      // A code:sync (or seed) already landed while Monaco was still loading.
+      pushCurrentContentToEditor();
+    } else {
+      scheduleSeedIfReady();
+    }
+  }, [pushCurrentContentToEditor, scheduleSeedIfReady]);
 
   const copyCode = useCallback(() => {
     if (!room?.joinCode) return;
@@ -45,12 +144,24 @@ export default function Room() {
       });
   }, [roomId]);
 
-  // Socket: presence + editor sync + cursors
+  // Socket: presence + OT editor sync + cursors
   useEffect(() => {
     const socket = socketRef.current;
     if (!socket || !connected) return;
 
+    // Fresh room/reconnect: reset local OT state and clear the editor (if
+    // mounted) until either a code:sync arrives (room already has content)
+    // or the seed timer fires (room is genuinely new).
+    docRef.current = '';
+    otClientRef.current.setRevision(0);
+    syncedRef.current = false;
+    roomJoinedRef.current = false;
+    clearTimeout(seedTimer.current);
+    pushCurrentContentToEditor();
+
     socket.emit('room:join', roomId);
+    roomJoinedRef.current = true;
+    scheduleSeedIfReady();
 
     socket.on('presence:update', (data) => {
       if (data.roomId === roomId) setPresenceUsers(data.users);
@@ -58,12 +169,39 @@ export default function Room() {
 
     socket.on('code:sync', (data) => {
       if (data.roomId !== roomId) return;
-      applyRemoteContent(data.content, data.language);
+      clearTimeout(seedTimer.current);
+      syncedRef.current = true;
+      if (data.language) setLanguage(data.language);
+      docRef.current = data.content;
+      otClientRef.current.setRevision(data.revision ?? 0);
+      pushCurrentContentToEditor();
     });
 
+    // Legacy path — kept only for language broadcasts (content sync is now
+    // handled entirely by code:op/code:sync above).
     socket.on('code:change', (data) => {
       if (data.roomId !== roomId) return;
-      applyRemoteContent(data.content, data.language);
+      if (data.language) setLanguage(data.language);
+    });
+
+    socket.on('code:op', (data) => {
+      if (data.roomId !== roomId) return;
+      const editor = editorRef.current;
+      if (!editor) return;
+      const remoteOp = TextOperation.fromJSON(data.operation);
+      const toApply = otClientRef.current.applyServer(remoteOp);
+      docRef.current = toApply.apply(docRef.current);
+      isRemote.current = true;
+      applyOperationToModel(editor, toApply);
+      isRemote.current = false;
+    });
+
+    socket.on('code:ack', (data) => {
+      if (data.roomId !== roomId) return;
+      const { send } = otClientRef.current.serverAck();
+      if (send && socket && connected) {
+        socket.emit('code:op', { roomId, revision: otClientRef.current.revision, operation: send.toJSON() });
+      }
     });
 
     socket.on('cursor:move', (data) => {
@@ -85,35 +223,33 @@ export default function Room() {
     });
 
     return () => {
+      clearTimeout(seedTimer.current);
       socket.off('presence:update');
       socket.off('code:sync');
       socket.off('code:change');
+      socket.off('code:op');
+      socket.off('code:ack');
       socket.off('cursor:move');
       socket.off('cursor:leave');
     };
-  }, [socketRef, connected, roomId]);
+  }, [socketRef, connected, roomId, pushCurrentContentToEditor, scheduleSeedIfReady]);
 
-  function applyRemoteContent(content, lang) {
-    if (lang) setLanguage(lang);
-    const editor = editorRef.current;
-    if (!editor) return;
-    isRemote.current = true;
-    editor.setValue(content);
-    isRemote.current = false;
-  }
-
-  const handleContentChange = useCallback(
-    (value) => {
+  const handleLocalChange = useCallback(
+    (event) => {
       if (isRemote.current) return;
-      clearTimeout(contentTimer.current);
-      contentTimer.current = setTimeout(() => {
+      const operation = operationFromMonacoEvent(docRef.current, event.changes);
+      if (operation.isNoop()) return;
+      docRef.current = operation.apply(docRef.current);
+
+      const { send } = otClientRef.current.applyClient(operation);
+      if (send) {
         const socket = socketRef.current;
         if (socket && connected) {
-          socket.emit('code:change', { roomId, content: value, language });
+          socket.emit('code:op', { roomId, revision: otClientRef.current.revision, operation: send.toJSON() });
         }
-      }, CONTENT_DEBOUNCE_MS);
+      }
     },
-    [socketRef, connected, roomId, language],
+    [socketRef, connected, roomId],
   );
 
   const handleLanguageChange = useCallback(
@@ -204,8 +340,9 @@ export default function Room() {
           <MonacoEditor
             language={language}
             onLanguageChange={handleLanguageChange}
-            onContentChange={handleContentChange}
+            onLocalChange={handleLocalChange}
             onCursorChange={handleCursorChange}
+            onEditorReady={handleEditorReady}
             remoteCursors={remoteCursors}
             editorRef={editorRef}
           />
