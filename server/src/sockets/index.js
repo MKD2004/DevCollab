@@ -1,7 +1,20 @@
 const { Server } = require('socket.io');
+const { createAdapter } = require('@socket.io/redis-adapter');
 const jwt = require('jsonwebtoken');
 const { registerPresenceEvents } = require('./presenceEvents');
 const { registerEditorEvents } = require('./editorEvents');
+const { createRedisClients } = require('../config/redis');
+
+// Attaches the Redis pub/sub adapter to `io` so that io.to(room).emit(...)
+// fans out across multiple Node processes, not just sockets on this one.
+// No-ops (single-process mode) when REDIS_URL isn't configured.
+async function attachRedisAdapter(io) {
+  const clients = await createRedisClients();
+  if (!clients) return null;
+  const { pubClient, subClient } = clients;
+  io.adapter(createAdapter(pubClient, subClient));
+  return clients;
+}
 
 function createSocketServer(httpServer) {
   const io = new Server(httpServer, {
@@ -31,3 +44,4 @@ function createSocketServer(httpServer) {
 }
 
 module.exports = createSocketServer;
+module.exports.attachRedisAdapter = attachRedisAdapter;
