@@ -159,3 +159,70 @@ describe('code:sync', () => {
     socket.disconnect();
   });
 });
+
+// ─── cursor:move / cursor:leave ───────────────────────────────────────────────
+
+describe('cursor:move', () => {
+  it('broadcasts cursor position to others in the room', async () => {
+    const tokenA = makeToken({ id: 'u8', username: 'henry' });
+    const tokenB = makeToken({ id: 'u9', username: 'iris' });
+    const socketA = await connect(tokenA);
+    const socketB = await connect(tokenB);
+
+    await new Promise((resolve) => {
+      socketA.emit('room:join', 'cursor-room-1');
+      socketB.emit('room:join', 'cursor-room-1');
+      setTimeout(resolve, 50);
+    });
+
+    const received = await new Promise((resolve) => {
+      socketB.on('cursor:move', resolve);
+      socketA.emit('cursor:move', { roomId: 'cursor-room-1', position: { lineNumber: 3, column: 7 } });
+    });
+
+    expect(received.userId).toBe('u8');
+    expect(received.username).toBe('henry');
+    expect(received.position).toEqual({ lineNumber: 3, column: 7 });
+    socketA.disconnect();
+    socketB.disconnect();
+  });
+
+  it('does not echo cursor back to sender', async () => {
+    const token = makeToken({ id: 'u10', username: 'jack' });
+    const socket = await connect(token);
+
+    await new Promise((resolve) => {
+      socket.emit('room:join', 'cursor-room-2');
+      setTimeout(resolve, 50);
+    });
+
+    let echoed = false;
+    socket.on('cursor:move', () => { echoed = true; });
+    socket.emit('cursor:move', { roomId: 'cursor-room-2', position: { lineNumber: 1, column: 1 } });
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(echoed).toBe(false);
+    socket.disconnect();
+  });
+
+  it('emits cursor:leave to peers when a socket disconnects', async () => {
+    const tokenA = makeToken({ id: 'u11', username: 'kate' });
+    const tokenB = makeToken({ id: 'u12', username: 'liam' });
+    const socketA = await connect(tokenA);
+    const socketB = await connect(tokenB);
+
+    await new Promise((resolve) => {
+      socketA.emit('room:join', 'cursor-room-3');
+      socketB.emit('room:join', 'cursor-room-3');
+      setTimeout(resolve, 50);
+    });
+
+    const leave = await new Promise((resolve) => {
+      socketB.on('cursor:leave', resolve);
+      socketA.disconnect();
+    });
+
+    expect(leave.userId).toBe('u11');
+    socketB.disconnect();
+  });
+});

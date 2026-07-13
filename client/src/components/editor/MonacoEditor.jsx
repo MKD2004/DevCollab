@@ -1,7 +1,35 @@
-import { useRef } from 'react';
+import { useRef, useEffect } from 'react';
 import Editor from '@monaco-editor/react';
 
 const LANGUAGES = ['javascript', 'typescript', 'python', 'cpp', 'java', 'go', 'rust'];
+
+// Hex values matching PresenceList's Tailwind palette (indigo/emerald/rose/amber/sky/violet 500)
+const CURSOR_COLORS = ['#6366f1', '#10b981', '#f43f5e', '#f59e0b', '#0ea5e9', '#8b5cf6'];
+
+function colorIdx(username) {
+  let h = 0;
+  for (const ch of username) h = (h * 31 + ch.charCodeAt(0)) & 0xffffffff;
+  return Math.abs(h) % CURSOR_COLORS.length;
+}
+
+function injectCursorCSS() {
+  if (document.getElementById('rcu-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'rcu-styles';
+  style.textContent = CURSOR_COLORS.map(
+    (color, i) => `
+    .rcu-c${i} {
+      display: inline-block; width: 2px; background: ${color};
+      height: 1.15em; vertical-align: text-bottom; margin-right: -1px;
+    }
+    .rcu-l${i} {
+      background: ${color}; color: #fff; font-size: 10px; font-family: sans-serif;
+      padding: 1px 4px; border-radius: 3px; margin-left: 2px;
+      white-space: nowrap; pointer-events: none; line-height: 1.4;
+    }`,
+  ).join('');
+  document.head.appendChild(style);
+}
 
 export const DEFAULT_CODE = `// Welcome to DevCollab
 function greet(name) {
@@ -18,13 +46,52 @@ users.forEach((user, i) => {
 });
 `;
 
-export default function MonacoEditor({ language, onLanguageChange, onContentChange, editorRef }) {
+export default function MonacoEditor({
+  language,
+  onLanguageChange,
+  onContentChange,
+  onCursorChange,
+  remoteCursors,
+  editorRef,
+}) {
   const internalRef = useRef(null);
+  const decorationsRef = useRef([]);
 
   const handleMount = (editor) => {
     internalRef.current = editor;
     if (editorRef) editorRef.current = editor;
+    injectCursorCSS();
+
+    editor.onDidChangeCursorPosition((e) => {
+      onCursorChange?.({ lineNumber: e.position.lineNumber, column: e.position.column });
+    });
   };
+
+  // Apply remote cursor decorations whenever remoteCursors map changes
+  useEffect(() => {
+    const editor = internalRef.current;
+    if (!editor || !remoteCursors) return;
+
+    const newDecorations = [];
+    remoteCursors.forEach(({ username, position }) => {
+      const idx = colorIdx(username);
+      newDecorations.push({
+        range: {
+          startLineNumber: position.lineNumber,
+          startColumn: position.column,
+          endLineNumber: position.lineNumber,
+          endColumn: position.column,
+        },
+        options: {
+          description: `cursor-${username}`,
+          before: { content: '⁠', inlineClassName: `rcu-c${idx}` },
+          after: { content: username, inlineClassName: `rcu-l${idx}` },
+        },
+      });
+    });
+
+    decorationsRef.current = editor.deltaDecorations(decorationsRef.current, newDecorations);
+  }, [remoteCursors]);
 
   return (
     <div className="flex flex-col h-full">

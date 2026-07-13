@@ -6,7 +6,8 @@ import { getRoom } from '../api/rooms';
 import MonacoEditor, { DEFAULT_CODE } from '../components/editor/MonacoEditor';
 import PresenceList from '../components/presence/PresenceList';
 
-const DEBOUNCE_MS = 200;
+const CONTENT_DEBOUNCE_MS = 200;
+const CURSOR_DEBOUNCE_MS = 50;
 
 export default function Room() {
   const { roomId } = useParams();
@@ -19,11 +20,13 @@ export default function Room() {
   const [presenceUsers, setPresenceUsers] = useState([]);
   const [codeCopied, setCodeCopied] = useState(false);
   const [language, setLanguage] = useState('javascript');
+  // Map<userId, { username, position: { lineNumber, column } }>
+  const [remoteCursors, setRemoteCursors] = useState(new Map());
 
-  // Editor imperative handle + echo-suppression flag
   const editorRef = useRef(null);
   const isRemote = useRef(false);
-  const debounceTimer = useRef(null);
+  const contentTimer = useRef(null);
+  const cursorTimer = useRef(null);
 
   const copyCode = useCallback(() => {
     if (!room?.joinCode) return;
@@ -42,7 +45,7 @@ export default function Room() {
       });
   }, [roomId]);
 
-  // Socket: presence + editor sync
+  // Socket: presence + editor sync + cursors
   useEffect(() => {
     const socket = socketRef.current;
     if (!socket || !connected) return;
@@ -53,22 +56,40 @@ export default function Room() {
       if (data.roomId === roomId) setPresenceUsers(data.users);
     });
 
-    // Late-join: server sends current room content
     socket.on('code:sync', (data) => {
       if (data.roomId !== roomId) return;
       applyRemoteContent(data.content, data.language);
     });
 
-    // Peer broadcast
     socket.on('code:change', (data) => {
       if (data.roomId !== roomId) return;
       applyRemoteContent(data.content, data.language);
+    });
+
+    socket.on('cursor:move', (data) => {
+      if (data.roomId !== roomId) return;
+      setRemoteCursors((prev) => {
+        const next = new Map(prev);
+        next.set(data.userId, { username: data.username, position: data.position });
+        return next;
+      });
+    });
+
+    socket.on('cursor:leave', (data) => {
+      if (data.roomId !== roomId) return;
+      setRemoteCursors((prev) => {
+        const next = new Map(prev);
+        next.delete(data.userId);
+        return next;
+      });
     });
 
     return () => {
       socket.off('presence:update');
       socket.off('code:sync');
       socket.off('code:change');
+      socket.off('cursor:move');
+      socket.off('cursor:leave');
     };
   }, [socketRef, connected, roomId]);
 
@@ -84,13 +105,13 @@ export default function Room() {
   const handleContentChange = useCallback(
     (value) => {
       if (isRemote.current) return;
-      clearTimeout(debounceTimer.current);
-      debounceTimer.current = setTimeout(() => {
+      clearTimeout(contentTimer.current);
+      contentTimer.current = setTimeout(() => {
         const socket = socketRef.current;
         if (socket && connected) {
           socket.emit('code:change', { roomId, content: value, language });
         }
-      }, DEBOUNCE_MS);
+      }, CONTENT_DEBOUNCE_MS);
     },
     [socketRef, connected, roomId, language],
   );
@@ -106,6 +127,19 @@ export default function Room() {
           language: lang,
         });
       }
+    },
+    [socketRef, connected, roomId],
+  );
+
+  const handleCursorChange = useCallback(
+    (position) => {
+      clearTimeout(cursorTimer.current);
+      cursorTimer.current = setTimeout(() => {
+        const socket = socketRef.current;
+        if (socket && connected) {
+          socket.emit('cursor:move', { roomId, position });
+        }
+      }, CURSOR_DEBOUNCE_MS);
     },
     [socketRef, connected, roomId],
   );
@@ -171,6 +205,8 @@ export default function Room() {
             language={language}
             onLanguageChange={handleLanguageChange}
             onContentChange={handleContentChange}
+            onCursorChange={handleCursorChange}
+            remoteCursors={remoteCursors}
             editorRef={editorRef}
           />
         </div>
