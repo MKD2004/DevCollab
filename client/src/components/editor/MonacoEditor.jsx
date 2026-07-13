@@ -61,31 +61,28 @@ export default function MonacoEditor({
   useEffect(() => {
     onCursorChangeRef.current = onCursorChange;
   });
-
-  const handleMount = (editor) => {
-    internalRef.current = editor;
-    if (editorRef) editorRef.current = editor;
-    injectCursorCSS();
-
-    editor.onDidChangeCursorPosition((e) => {
-      onCursorChangeRef.current?.({ lineNumber: e.position.lineNumber, column: e.position.column });
-    });
-  };
-
-  // Apply remote cursor decorations whenever remoteCursors map changes
+  // Ref so content-change re-renders (below) always redraw the latest cursors
+  const remoteCursorsRef = useRef(remoteCursors);
   useEffect(() => {
+    remoteCursorsRef.current = remoteCursors;
+  }, [remoteCursors]);
+
+  const applyDecorations = () => {
     const editor = internalRef.current;
-    if (!editor || !remoteCursors) return;
+    const cursors = remoteCursorsRef.current;
+    if (!editor || !cursors) return;
 
     const newDecorations = [];
-    remoteCursors.forEach(({ username, position }) => {
+    cursors.forEach(({ username, position }) => {
       const idx = colorIdx(username);
       newDecorations.push({
+        // Monaco silently drops `before`/`after` injected text on a collapsed
+        // (zero-width) range, so the range must span at least one column.
         range: {
           startLineNumber: position.lineNumber,
           startColumn: position.column,
           endLineNumber: position.lineNumber,
-          endColumn: position.column,
+          endColumn: position.column + 1,
         },
         options: {
           description: `cursor-${username}`,
@@ -96,6 +93,29 @@ export default function MonacoEditor({
     });
 
     decorationsRef.current = editor.deltaDecorations(decorationsRef.current, newDecorations);
+  };
+
+  const handleMount = (editor) => {
+    internalRef.current = editor;
+    if (editorRef) editorRef.current = editor;
+    injectCursorCSS();
+
+    editor.onDidChangeCursorPosition((e) => {
+      onCursorChangeRef.current?.({ lineNumber: e.position.lineNumber, column: e.position.column });
+    });
+
+    // editor.setValue() (used to apply incoming code:sync/code:change content)
+    // replaces the whole buffer and drops every decoration on it, so remote
+    // cursor markers must be reapplied after any content change.
+    editor.onDidChangeModelContent(() => {
+      decorationsRef.current = [];
+      applyDecorations();
+    });
+  };
+
+  // Apply remote cursor decorations whenever remoteCursors map changes
+  useEffect(() => {
+    applyDecorations();
   }, [remoteCursors]);
 
   return (
