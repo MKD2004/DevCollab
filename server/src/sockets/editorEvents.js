@@ -1,8 +1,34 @@
-// In-memory editor state: roomId -> { content, language }
+const TextOperation = require('../ot/TextOperation');
+const OTDocument = require('../ot/OTDocument');
+
+// In-memory editor state: roomId -> { content, language } (legacy last-write-wins)
 const roomEditorState = new Map();
+
+// In-memory OT documents: roomId -> OTDocument
+const roomOTDocs = new Map();
+
+function getOrCreateOTDoc(roomId) {
+  let doc = roomOTDocs.get(roomId);
+  if (!doc) {
+    const legacyState = roomEditorState.get(roomId);
+    doc = new OTDocument(legacyState?.content ?? '', legacyState?.language ?? 'javascript');
+    roomOTDocs.set(roomId, doc);
+  }
+  return doc;
+}
 
 function registerEditorEvents(io, socket) {
   socket.on('room:join', (roomId) => {
+    const otDoc = roomOTDocs.get(roomId);
+    if (otDoc) {
+      socket.emit('code:sync', {
+        roomId,
+        content: otDoc.content,
+        language: otDoc.language,
+        revision: otDoc.revision,
+      });
+      return;
+    }
     const state = roomEditorState.get(roomId);
     if (state) {
       socket.emit('code:sync', { roomId, content: state.content, language: state.language });
@@ -13,6 +39,39 @@ function registerEditorEvents(io, socket) {
     if (typeof roomId !== 'string' || typeof content !== 'string') return;
     roomEditorState.set(roomId, { content, language: language || 'javascript' });
     socket.to(roomId).emit('code:change', { roomId, content, language });
+  });
+
+  // OT-based concurrent editing: client submits an operation against the
+  // revision it last saw; server transforms it forward against any
+  // operations it missed, applies it, and broadcasts the transformed op.
+  socket.on('code:op', ({ roomId, revision, operation, language }) => {
+    if (typeof roomId !== 'string' || typeof revision !== 'number' || !Array.isArray(operation)) return;
+
+    const otDoc = getOrCreateOTDoc(roomId);
+    if (language) otDoc.language = language;
+
+    let result;
+    try {
+      const parsedOp = TextOperation.fromJSON(operation);
+      result = otDoc.applyClientOperation(revision, parsedOp);
+    } catch {
+      // Client's revision/operation is invalid or unrecoverable — force a full resync.
+      socket.emit('code:sync', {
+        roomId,
+        content: otDoc.content,
+        language: otDoc.language,
+        revision: otDoc.revision,
+      });
+      return;
+    }
+
+    socket.emit('code:ack', { roomId, revision: result.revision });
+    socket.to(roomId).emit('code:op', {
+      roomId,
+      operation: result.operation.toJSON(),
+      revision: result.revision,
+      userId: socket.data.user.id,
+    });
   });
 
   socket.on('cursor:move', ({ roomId, position }) => {
