@@ -1,10 +1,12 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth.jsx';
 import { useSocket } from '../hooks/useSocket.js';
 import { getRoom } from '../api/rooms';
-import MonacoEditor from '../components/editor/MonacoEditor';
+import MonacoEditor, { DEFAULT_CODE } from '../components/editor/MonacoEditor';
 import PresenceList from '../components/presence/PresenceList';
+
+const DEBOUNCE_MS = 200;
 
 export default function Room() {
   const { roomId } = useParams();
@@ -16,6 +18,12 @@ export default function Room() {
   const [loadError, setLoadError] = useState('');
   const [presenceUsers, setPresenceUsers] = useState([]);
   const [codeCopied, setCodeCopied] = useState(false);
+  const [language, setLanguage] = useState('javascript');
+
+  // Editor imperative handle + echo-suppression flag
+  const editorRef = useRef(null);
+  const isRemote = useRef(false);
+  const debounceTimer = useRef(null);
 
   const copyCode = useCallback(() => {
     if (!room?.joinCode) return;
@@ -34,7 +42,7 @@ export default function Room() {
       });
   }, [roomId]);
 
-  // Join socket room and listen for presence updates
+  // Socket: presence + editor sync
   useEffect(() => {
     const socket = socketRef.current;
     if (!socket || !connected) return;
@@ -45,10 +53,62 @@ export default function Room() {
       if (data.roomId === roomId) setPresenceUsers(data.users);
     });
 
+    // Late-join: server sends current room content
+    socket.on('code:sync', (data) => {
+      if (data.roomId !== roomId) return;
+      applyRemoteContent(data.content, data.language);
+    });
+
+    // Peer broadcast
+    socket.on('code:change', (data) => {
+      if (data.roomId !== roomId) return;
+      applyRemoteContent(data.content, data.language);
+    });
+
     return () => {
       socket.off('presence:update');
+      socket.off('code:sync');
+      socket.off('code:change');
     };
   }, [socketRef, connected, roomId]);
+
+  function applyRemoteContent(content, lang) {
+    if (lang) setLanguage(lang);
+    const editor = editorRef.current;
+    if (!editor) return;
+    isRemote.current = true;
+    editor.setValue(content);
+    isRemote.current = false;
+  }
+
+  const handleContentChange = useCallback(
+    (value) => {
+      if (isRemote.current) return;
+      clearTimeout(debounceTimer.current);
+      debounceTimer.current = setTimeout(() => {
+        const socket = socketRef.current;
+        if (socket && connected) {
+          socket.emit('code:change', { roomId, content: value, language });
+        }
+      }, DEBOUNCE_MS);
+    },
+    [socketRef, connected, roomId, language],
+  );
+
+  const handleLanguageChange = useCallback(
+    (lang) => {
+      setLanguage(lang);
+      const socket = socketRef.current;
+      if (socket && connected) {
+        socket.emit('code:change', {
+          roomId,
+          content: editorRef.current?.getValue() ?? DEFAULT_CODE,
+          language: lang,
+        });
+      }
+    },
+    [socketRef, connected, roomId],
+  );
 
   if (loadError) {
     return (
@@ -107,7 +167,12 @@ export default function Room() {
       <div className="flex flex-1 overflow-hidden">
         {/* Editor */}
         <div className="flex-1 overflow-hidden">
-          <MonacoEditor />
+          <MonacoEditor
+            language={language}
+            onLanguageChange={handleLanguageChange}
+            onContentChange={handleContentChange}
+            editorRef={editorRef}
+          />
         </div>
 
         {/* Sidebar — presence */}

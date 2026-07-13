@@ -1,10 +1,9 @@
-import { useRef, useState } from 'react';
+import { useRef } from 'react';
 import Editor from '@monaco-editor/react';
 
 const LANGUAGES = ['javascript', 'typescript', 'python', 'cpp', 'java', 'go', 'rust'];
 
-const DEFAULT_CODE = {
-  javascript: `// Welcome to DevCollab
+export const DEFAULT_CODE = `// Welcome to DevCollab
 function greet(name) {
   return \`Hello, \${name}! Ready to collaborate?\`;
 }
@@ -12,21 +11,19 @@ function greet(name) {
 const message = greet('World');
 console.log(message);
 
-// Try editing this — syntax highlighting is live
+// Try editing this — changes sync to everyone in the room
 const users = ['Alice', 'Bob', 'Carol'];
 users.forEach((user, i) => {
   console.log(\`User \${i + 1}: \${user}\`);
 });
-`,
-};
+`;
 
-export default function MonacoEditor() {
-  const editorRef = useRef(null);
-  const [language, setLanguage] = useState('javascript');
-  const [value, setValue] = useState(DEFAULT_CODE.javascript);
+export default function MonacoEditor({ language, onLanguageChange, onContentChange, editorRef }) {
+  const internalRef = useRef(null);
 
-  const handleEditorDidMount = (editor) => {
-    editorRef.current = editor;
+  const handleMount = (editor) => {
+    internalRef.current = editor;
+    if (editorRef) editorRef.current = editor;
   };
 
   return (
@@ -35,7 +32,7 @@ export default function MonacoEditor() {
         <span className="text-gray-400 text-sm">Language:</span>
         <select
           value={language}
-          onChange={(e) => setLanguage(e.target.value)}
+          onChange={(e) => onLanguageChange?.(e.target.value)}
           className="bg-gray-800 text-white text-sm border border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500"
         >
           {LANGUAGES.map((l) => (
@@ -51,10 +48,10 @@ export default function MonacoEditor() {
         <Editor
           height="100%"
           language={language}
-          value={value}
+          defaultValue={DEFAULT_CODE}
           theme="vs-dark"
-          onChange={(v) => setValue(v)}
-          onMount={handleEditorDidMount}
+          onChange={(v) => onContentChange?.(v ?? '')}
+          onMount={handleMount}
           options={{
             fontSize: 14,
             minimap: { enabled: true },

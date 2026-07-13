@@ -1,6 +1,7 @@
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const { registerPresenceEvents } = require('./presenceEvents');
+const { registerEditorEvents } = require('./editorEvents');
 
 function createSocketServer(httpServer) {
   const io = new Server(httpServer, {
@@ -23,6 +24,7 @@ function createSocketServer(httpServer) {
 
   io.on('connection', (socket) => {
     registerPresenceEvents(io, socket);
+    registerEditorEvents(io, socket);
   });
 
   return io;
