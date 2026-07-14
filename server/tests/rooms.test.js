@@ -61,6 +61,20 @@ describe('POST /api/rooms', () => {
     expect(res.status).toBe(401);
   });
 
+  it('creates a default "main" branch for the new room', async () => {
+    const token = await registerAndLogin('branch-default');
+    const created = await createRoom(token, 'Branchy Room');
+    const roomId = created.body.room._id;
+
+    const res = await request(app)
+      .get(`/api/rooms/${roomId}/branches`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.branches).toHaveLength(1);
+    expect(res.body.branches[0]).toMatchObject({ name: 'main', isDefault: true });
+  });
+
   it('rejects missing room name', async () => {
     const token = await registerAndLogin('b');
     const res = await request(app)

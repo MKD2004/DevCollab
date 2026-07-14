@@ -54,6 +54,7 @@ export default function MonacoEditor({
   onEditorReady,
   remoteCursors,
   editorRef,
+  branchTabsSlot,
 }) {
   const internalRef = useRef(null);
   const decorationsRef = useRef([]);
@@ -145,7 +146,7 @@ export default function MonacoEditor({
             </option>
           ))}
         </select>
-        <span className="ml-auto text-xs text-gray-500">main branch</span>
+        {branchTabsSlot}
       </div>
 
       <div className="flex-1">

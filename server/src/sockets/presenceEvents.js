@@ -25,6 +25,24 @@ function registerPresenceEvents(io, socket) {
     });
   });
 
+  socket.on('room:leave', (roomId) => {
+    socket.leave(roomId);
+
+    const room = roomPresence.get(roomId);
+    if (room) {
+      room.delete(socket.id);
+      if (room.size === 0) roomPresence.delete(roomId);
+      else {
+        io.to(roomId).emit('presence:update', {
+          roomId,
+          users: getPresenceList(roomId),
+        });
+      }
+    }
+
+    if (socket.data.rooms) socket.data.rooms.delete(roomId);
+  });
+
   socket.on('disconnect', () => {
     if (!socket.data.rooms) return;
     for (const roomId of socket.data.rooms) {

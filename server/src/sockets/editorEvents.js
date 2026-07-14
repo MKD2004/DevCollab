@@ -95,4 +95,21 @@ function registerEditorEvents(io, socket) {
   });
 }
 
-module.exports = { registerEditorEvents };
+// Returns the current { content, language } for a room/branch id, or null if
+// nothing has been edited yet. Used by branch creation to fork content.
+function getOTDocState(roomId) {
+  const doc = roomOTDocs.get(roomId);
+  if (doc) return { content: doc.content, language: doc.language };
+  const legacyState = roomEditorState.get(roomId);
+  if (legacyState) return { content: legacyState.content, language: legacyState.language };
+  return null;
+}
+
+// Seeds a fresh room/branch id with initial content, e.g. when forking a
+// branch. No-ops if a document already exists for that id.
+function seedOTDocState(roomId, content, language) {
+  if (roomOTDocs.has(roomId)) return;
+  roomOTDocs.set(roomId, new OTDocument(content, language));
+}
+
+module.exports = { registerEditorEvents, getOTDocState, seedOTDocState };

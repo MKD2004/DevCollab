@@ -3,7 +3,9 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth.jsx';
 import { useSocket } from '../hooks/useSocket.js';
 import { getRoom } from '../api/rooms';
+import { listBranches, createBranch } from '../api/branches';
 import MonacoEditor, { DEFAULT_CODE } from '../components/editor/MonacoEditor';
+import BranchTabs from '../components/editor/BranchTabs';
 import PresenceList from '../components/presence/PresenceList';
 import { TextOperation } from '../ot/TextOperation';
 import { OTClient } from '../ot/OTClient';
@@ -73,6 +75,8 @@ export default function Room() {
 
   const [room, setRoom] = useState(null);
   const [loadError, setLoadError] = useState('');
+  const [branches, setBranches] = useState([]);
+  const [currentBranchId, setCurrentBranchId] = useState(null);
   const [presenceUsers, setPresenceUsers] = useState([]);
   const [codeCopied, setCodeCopied] = useState(false);
   const [language, setLanguage] = useState('javascript');
@@ -134,7 +138,7 @@ export default function Room() {
     setTimeout(() => setCodeCopied(false), 2000);
   }, [room]);
 
-  // Fetch room metadata (auto-joins if not a member)
+  // Fetch room metadata (auto-joins if not a member) and its branch list
   useEffect(() => {
     getRoom(roomId)
       .then((res) => setRoom(res.data.room))
@@ -142,16 +146,43 @@ export default function Room() {
         const status = err.response?.status;
         setLoadError(status === 404 ? 'Room not found.' : 'Failed to load room.');
       });
+
+    listBranches(roomId)
+      .then((res) => {
+        const list = res.data.branches;
+        setBranches(list);
+        const defaultBranch = list.find((b) => b.isDefault) ?? list[0];
+        if (defaultBranch) setCurrentBranchId(defaultBranch._id);
+      })
+      .catch(() => setLoadError('Failed to load branches.'));
   }, [roomId]);
 
-  // Socket: presence + OT editor sync + cursors
+  const handleCreateBranch = useCallback(
+    async (name) => {
+      try {
+        const res = await createBranch(roomId, { name, fromBranchId: currentBranchId });
+        const newBranch = res.data.branch;
+        setBranches((prev) => [...prev, newBranch]);
+        setCurrentBranchId(newBranch._id);
+      } catch {
+        // Best-effort — branch list simply won't gain the new entry.
+      }
+    },
+    [roomId, currentBranchId],
+  );
+
+  // Socket: presence + OT editor sync + cursors, scoped to the current branch.
+  // Content identity is per-branch, so the socket "room" joined here is the
+  // branch id, not the DevCollab room id — switching branches re-runs this
+  // effect (cleanup leaves the old branch, then we join the new one).
   useEffect(() => {
     const socket = socketRef.current;
-    if (!socket || !connected) return;
+    if (!socket || !connected || !currentBranchId) return;
+    const branchId = currentBranchId;
 
-    // Fresh room/reconnect: reset local OT state and clear the editor (if
-    // mounted) until either a code:sync arrives (room already has content)
-    // or the seed timer fires (room is genuinely new).
+    // Fresh branch/reconnect: reset local OT state and clear the editor (if
+    // mounted) until either a code:sync arrives (branch already has content)
+    // or the seed timer fires (branch is genuinely new).
     docRef.current = '';
     otClientRef.current.setRevision(0);
     syncedRef.current = false;
@@ -159,16 +190,16 @@ export default function Room() {
     clearTimeout(seedTimer.current);
     pushCurrentContentToEditor();
 
-    socket.emit('room:join', roomId);
+    socket.emit('room:join', branchId);
     roomJoinedRef.current = true;
     scheduleSeedIfReady();
 
     socket.on('presence:update', (data) => {
-      if (data.roomId === roomId) setPresenceUsers(data.users);
+      if (data.roomId === branchId) setPresenceUsers(data.users);
     });
 
     socket.on('code:sync', (data) => {
-      if (data.roomId !== roomId) return;
+      if (data.roomId !== branchId) return;
       clearTimeout(seedTimer.current);
       syncedRef.current = true;
       if (data.language) setLanguage(data.language);
@@ -180,12 +211,12 @@ export default function Room() {
     // Legacy path — kept only for language broadcasts (content sync is now
     // handled entirely by code:op/code:sync above).
     socket.on('code:change', (data) => {
-      if (data.roomId !== roomId) return;
+      if (data.roomId !== branchId) return;
       if (data.language) setLanguage(data.language);
     });
 
     socket.on('code:op', (data) => {
-      if (data.roomId !== roomId) return;
+      if (data.roomId !== branchId) return;
       const editor = editorRef.current;
       if (!editor) return;
       const remoteOp = TextOperation.fromJSON(data.operation);
@@ -197,15 +228,15 @@ export default function Room() {
     });
 
     socket.on('code:ack', (data) => {
-      if (data.roomId !== roomId) return;
+      if (data.roomId !== branchId) return;
       const { send } = otClientRef.current.serverAck();
       if (send && socket && connected) {
-        socket.emit('code:op', { roomId, revision: otClientRef.current.revision, operation: send.toJSON() });
+        socket.emit('code:op', { roomId: branchId, revision: otClientRef.current.revision, operation: send.toJSON() });
       }
     });
 
     socket.on('cursor:move', (data) => {
-      if (data.roomId !== roomId) return;
+      if (data.roomId !== branchId) return;
       setRemoteCursors((prev) => {
         const next = new Map(prev);
         next.set(data.userId, { username: data.username, position: data.position });
@@ -214,7 +245,7 @@ export default function Room() {
     });
 
     socket.on('cursor:leave', (data) => {
-      if (data.roomId !== roomId) return;
+      if (data.roomId !== branchId) return;
       setRemoteCursors((prev) => {
         const next = new Map(prev);
         next.delete(data.userId);
@@ -231,8 +262,10 @@ export default function Room() {
       socket.off('code:ack');
       socket.off('cursor:move');
       socket.off('cursor:leave');
+      socket.emit('room:leave', branchId);
+      setRemoteCursors(new Map());
     };
-  }, [socketRef, connected, roomId, pushCurrentContentToEditor, scheduleSeedIfReady]);
+  }, [socketRef, connected, currentBranchId, pushCurrentContentToEditor, scheduleSeedIfReady]);
 
   const handleLocalChange = useCallback(
     (event) => {
@@ -245,11 +278,11 @@ export default function Room() {
       if (send) {
         const socket = socketRef.current;
         if (socket && connected) {
-          socket.emit('code:op', { roomId, revision: otClientRef.current.revision, operation: send.toJSON() });
+          socket.emit('code:op', { roomId: currentBranchId, revision: otClientRef.current.revision, operation: send.toJSON() });
         }
       }
     },
-    [socketRef, connected, roomId],
+    [socketRef, connected, currentBranchId],
   );
 
   const handleLanguageChange = useCallback(
@@ -258,13 +291,13 @@ export default function Room() {
       const socket = socketRef.current;
       if (socket && connected) {
         socket.emit('code:change', {
-          roomId,
+          roomId: currentBranchId,
           content: editorRef.current?.getValue() ?? DEFAULT_CODE,
           language: lang,
         });
       }
     },
-    [socketRef, connected, roomId],
+    [socketRef, connected, currentBranchId],
   );
 
   const handleCursorChange = useCallback(
@@ -273,11 +306,11 @@ export default function Room() {
       cursorTimer.current = setTimeout(() => {
         const socket = socketRef.current;
         if (socket && connected) {
-          socket.emit('cursor:move', { roomId, position });
+          socket.emit('cursor:move', { roomId: currentBranchId, position });
         }
       }, CURSOR_DEBOUNCE_MS);
     },
-    [socketRef, connected, roomId],
+    [socketRef, connected, currentBranchId],
   );
 
   if (loadError) {
@@ -345,6 +378,14 @@ export default function Room() {
             onEditorReady={handleEditorReady}
             remoteCursors={remoteCursors}
             editorRef={editorRef}
+            branchTabsSlot={
+              <BranchTabs
+                branches={branches}
+                currentBranchId={currentBranchId}
+                onSwitch={setCurrentBranchId}
+                onCreate={handleCreateBranch}
+              />
+            }
           />
         </div>
 
@@ -352,7 +393,7 @@ export default function Room() {
         <aside className="w-52 shrink-0 bg-gray-900 border-l border-gray-800 flex flex-col">
           <div className="px-4 py-3 border-b border-gray-800">
             <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-              In this room
+              In this branch
             </h2>
           </div>
           <PresenceList users={presenceUsers} />

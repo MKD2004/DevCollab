@@ -1,6 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const Room = require('../models/Room');
+const Branch = require('../models/Branch');
 const authMiddleware = require('../middleware/auth.middleware');
 
 const router = express.Router();
@@ -18,6 +19,12 @@ router.post('/', async (req, res) => {
       name: name.trim(),
       ownerId: req.user.id,
       members: [req.user.id],
+    });
+    await Branch.create({
+      roomId: room._id,
+      name: 'main',
+      createdBy: req.user.id,
+      isDefault: true,
     });
     res.status(201).json({ room });
   } catch (err) {
