@@ -4,10 +4,12 @@ import { useAuth } from '../hooks/useAuth.jsx';
 import { useSocket } from '../hooks/useSocket.js';
 import { getRoom } from '../api/rooms';
 import { listBranches, createBranch } from '../api/branches';
+import { getMessages } from '../api/messages';
 import MonacoEditor, { DEFAULT_CODE } from '../components/editor/MonacoEditor';
 import BranchTabs from '../components/editor/BranchTabs';
 import OutputPanel from '../components/editor/OutputPanel';
 import PresenceList from '../components/presence/PresenceList';
+import ChatPanel from '../components/chat/ChatPanel';
 import { TextOperation } from '../ot/TextOperation';
 import { OTClient } from '../ot/OTClient';
 
@@ -85,6 +87,8 @@ export default function Room() {
   const [remoteCursors, setRemoteCursors] = useState(new Map());
   const [runState, setRunState] = useState('idle'); // 'idle' | 'running'
   const [runOutput, setRunOutput] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [sidebarTab, setSidebarTab] = useState('people'); // 'people' | 'chat'
 
   const editorRef = useRef(null);
   const isRemote = useRef(false);
@@ -158,6 +162,12 @@ export default function Room() {
         if (defaultBranch) setCurrentBranchId(defaultBranch._id);
       })
       .catch(() => setLoadError('Failed to load branches.'));
+
+    getMessages(roomId)
+      .then((res) => setMessages(res.data.messages))
+      .catch(() => {
+        // Best-effort — chat simply starts empty if history fails to load.
+      });
   }, [roomId]);
 
   const handleCreateBranch = useCallback(
@@ -299,6 +309,35 @@ export default function Room() {
     };
   }, [socketRef, connected, currentBranchId, pushCurrentContentToEditor, scheduleSeedIfReady]);
 
+  // Socket: chat, scoped to the DevCollab room itself (not the branch) — it
+  // stays joined across branch switches, unlike the OT/presence effect above.
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket || !connected) return;
+
+    socket.emit('chat:join', roomId);
+
+    socket.on('chat:message', (msg) => {
+      if (msg.roomId !== roomId) return;
+      setMessages((prev) => [...prev, msg]);
+    });
+
+    return () => {
+      socket.off('chat:message');
+      socket.emit('chat:leave', roomId);
+    };
+  }, [socketRef, connected, roomId]);
+
+  const handleSendMessage = useCallback(
+    (text) => {
+      const socket = socketRef.current;
+      if (socket && connected) {
+        socket.emit('chat:message', { roomId, text });
+      }
+    },
+    [socketRef, connected, roomId],
+  );
+
   const handleLocalChange = useCallback(
     (event) => {
       if (isRemote.current) return;
@@ -436,14 +475,37 @@ export default function Room() {
           <OutputPanel state={runState} output={runOutput} />
         </div>
 
-        {/* Sidebar — presence */}
-        <aside className="w-52 shrink-0 bg-gray-900 border-l border-gray-800 flex flex-col">
-          <div className="px-4 py-3 border-b border-gray-800">
-            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-              In this branch
-            </h2>
+        {/* Sidebar — presence + chat */}
+        <aside className="w-72 shrink-0 bg-gray-900 border-l border-gray-800 flex flex-col">
+          <div className="flex border-b border-gray-800 shrink-0">
+            <button
+              onClick={() => setSidebarTab('people')}
+              className={`flex-1 px-4 py-3 text-xs font-semibold uppercase tracking-wider transition-colors ${
+                sidebarTab === 'people'
+                  ? 'text-white border-b-2 border-indigo-500'
+                  : 'text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              People
+            </button>
+            <button
+              onClick={() => setSidebarTab('chat')}
+              className={`flex-1 px-4 py-3 text-xs font-semibold uppercase tracking-wider transition-colors ${
+                sidebarTab === 'chat'
+                  ? 'text-white border-b-2 border-indigo-500'
+                  : 'text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              Chat
+            </button>
           </div>
-          <PresenceList users={presenceUsers} />
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            {sidebarTab === 'people' ? (
+              <PresenceList users={presenceUsers} />
+            ) : (
+              <ChatPanel messages={messages} currentUsername={user?.username} onSend={handleSendMessage} />
+            )}
+          </div>
         </aside>
       </div>
     </div>
