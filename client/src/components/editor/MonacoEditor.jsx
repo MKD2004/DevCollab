@@ -55,6 +55,8 @@ export default function MonacoEditor({
   remoteCursors,
   editorRef,
   branchTabsSlot,
+  onRun,
+  isRunning,
 }) {
   const internalRef = useRef(null);
   const decorationsRef = useRef([]);
@@ -147,6 +149,13 @@ export default function MonacoEditor({
           ))}
         </select>
         {branchTabsSlot}
+        <button
+          onClick={() => onRun?.()}
+          disabled={isRunning}
+          className="text-xs bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium px-3 py-1 rounded-lg transition-colors"
+        >
+          {isRunning ? 'Running…' : 'Run ▶'}
+        </button>
       </div>
 
       <div className="flex-1">

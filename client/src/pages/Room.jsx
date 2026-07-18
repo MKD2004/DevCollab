@@ -6,6 +6,7 @@ import { getRoom } from '../api/rooms';
 import { listBranches, createBranch } from '../api/branches';
 import MonacoEditor, { DEFAULT_CODE } from '../components/editor/MonacoEditor';
 import BranchTabs from '../components/editor/BranchTabs';
+import OutputPanel from '../components/editor/OutputPanel';
 import PresenceList from '../components/presence/PresenceList';
 import { TextOperation } from '../ot/TextOperation';
 import { OTClient } from '../ot/OTClient';
@@ -82,6 +83,8 @@ export default function Room() {
   const [language, setLanguage] = useState('javascript');
   // Map<userId, { username, position: { lineNumber, column } }>
   const [remoteCursors, setRemoteCursors] = useState(new Map());
+  const [runState, setRunState] = useState('idle'); // 'idle' | 'running'
+  const [runOutput, setRunOutput] = useState(null);
 
   const editorRef = useRef(null);
   const isRemote = useRef(false);
@@ -189,6 +192,8 @@ export default function Room() {
     roomJoinedRef.current = false;
     clearTimeout(seedTimer.current);
     pushCurrentContentToEditor();
+    setRunState('idle');
+    setRunOutput(null);
 
     socket.emit('room:join', branchId);
     roomJoinedRef.current = true;
@@ -253,6 +258,30 @@ export default function Room() {
       });
     });
 
+    socket.on('code:running', (data) => {
+      if (data.roomId !== branchId) return;
+      setRunState('running');
+      setRunOutput({ runningUser: data.username });
+    });
+
+    socket.on('code:result', (data) => {
+      if (data.roomId !== branchId) return;
+      setRunState('idle');
+      setRunOutput({
+        stdout: data.stdout,
+        stderr: data.stderr,
+        exitCode: data.exitCode,
+        compileOutput: data.compileOutput,
+        ranBy: data.ranBy,
+      });
+    });
+
+    socket.on('code:error', (data) => {
+      if (data.roomId !== branchId) return;
+      setRunState('idle');
+      setRunOutput({ error: data.message });
+    });
+
     return () => {
       clearTimeout(seedTimer.current);
       socket.off('presence:update');
@@ -262,6 +291,9 @@ export default function Room() {
       socket.off('code:ack');
       socket.off('cursor:move');
       socket.off('cursor:leave');
+      socket.off('code:running');
+      socket.off('code:result');
+      socket.off('code:error');
       socket.emit('room:leave', branchId);
       setRemoteCursors(new Map());
     };
@@ -299,6 +331,16 @@ export default function Room() {
     },
     [socketRef, connected, currentBranchId],
   );
+
+  const handleRun = useCallback(() => {
+    const socket = socketRef.current;
+    if (!socket || !connected || !currentBranchId) return;
+    socket.emit('code:run', {
+      roomId: currentBranchId,
+      code: docRef.current,
+      language,
+    });
+  }, [socketRef, connected, currentBranchId, language]);
 
   const handleCursorChange = useCallback(
     (position) => {
@@ -369,24 +411,29 @@ export default function Room() {
       {/* Main area */}
       <div className="flex flex-1 overflow-hidden">
         {/* Editor */}
-        <div className="flex-1 overflow-hidden">
-          <MonacoEditor
-            language={language}
-            onLanguageChange={handleLanguageChange}
-            onLocalChange={handleLocalChange}
-            onCursorChange={handleCursorChange}
-            onEditorReady={handleEditorReady}
-            remoteCursors={remoteCursors}
-            editorRef={editorRef}
-            branchTabsSlot={
-              <BranchTabs
-                branches={branches}
-                currentBranchId={currentBranchId}
-                onSwitch={setCurrentBranchId}
-                onCreate={handleCreateBranch}
-              />
-            }
-          />
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 overflow-hidden">
+            <MonacoEditor
+              language={language}
+              onLanguageChange={handleLanguageChange}
+              onLocalChange={handleLocalChange}
+              onCursorChange={handleCursorChange}
+              onEditorReady={handleEditorReady}
+              remoteCursors={remoteCursors}
+              editorRef={editorRef}
+              branchTabsSlot={
+                <BranchTabs
+                  branches={branches}
+                  currentBranchId={currentBranchId}
+                  onSwitch={setCurrentBranchId}
+                  onCreate={handleCreateBranch}
+                />
+              }
+              onRun={handleRun}
+              isRunning={runState === 'running'}
+            />
+          </div>
+          <OutputPanel state={runState} output={runOutput} />
         </div>
 
         {/* Sidebar — presence */}
