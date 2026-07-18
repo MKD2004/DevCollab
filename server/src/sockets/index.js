@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const { registerPresenceEvents } = require('./presenceEvents');
 const { registerEditorEvents } = require('./editorEvents');
 const { registerRunEvents } = require('./runEvents');
+const { registerChatEvents } = require('./chatEvents');
 const { createRedisClients } = require('../config/redis');
 
 // Attaches the Redis pub/sub adapter to `io` so that io.to(room).emit(...)
@@ -40,6 +41,7 @@ function createSocketServer(httpServer) {
     registerPresenceEvents(io, socket);
     registerEditorEvents(io, socket);
     registerRunEvents(io, socket);
+    registerChatEvents(io, socket);
   });
 
   return io;
