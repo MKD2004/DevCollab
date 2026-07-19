@@ -57,8 +57,33 @@ function registerRoomAuth(io, socket) {
       return;
     }
 
+    // Whether anyone else in this room is already this same user, checked
+    // *before* joining so the joiner never counts as their own peer. Uses
+    // fetchSockets (adapter-aware) rather than a local Map so the check still
+    // holds when sockets are spread across instances behind the Redis adapter.
+    let alreadyConnected = false;
+    try {
+      const peers = await io.in(chatRoom(roomId)).fetchSockets();
+      alreadyConnected = peers.some((peer) => peer.data?.user?.id === socket.data.user.id);
+    } catch {
+      // Treat an adapter hiccup as "not connected" — a duplicate notification
+      // is a far better failure mode than silently dropping a real one.
+    }
+
     socket.data.authorizedChatRooms.add(roomId);
     socket.join(chatRoom(roomId));
+
+    // Tell everyone already in the room that someone showed up. Suppressed
+    // when the user simply opened a second tab or reconnected, so this fires
+    // on a genuine arrival rather than on every socket.
+    if (!alreadyConnected) {
+      socket.to(chatRoom(roomId)).emit('member:joined', {
+        roomId,
+        userId: socket.data.user.id,
+        username: socket.data.user.username,
+        at: new Date().toISOString(),
+      });
+    }
   });
 
   socket.on('chat:leave', (roomId) => {

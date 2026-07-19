@@ -39,6 +39,18 @@ export default function ChatPanel({ messages, currentUsername, onSend }) {
           <p className="text-muted-foreground text-xs">No messages yet — say hi.</p>
         )}
         {messages.map((m) => {
+          // System lines (e.g. "alice joined the room") have no author and
+          // render as a centered divider rather than a chat bubble.
+          if (m.system) {
+            return (
+              <div key={m._id} className="flex items-center gap-2 my-0.5">
+                <span className="flex-1 h-px bg-border" />
+                <span className="text-[10px] text-muted-foreground/70 whitespace-nowrap">{m.text}</span>
+                <span className="flex-1 h-px bg-border" />
+              </div>
+            );
+          }
+
           const isOwn = m.username === currentUsername;
           return (
             <div key={m._id ?? `${m.username}-${m.createdAt}`} className="text-sm">

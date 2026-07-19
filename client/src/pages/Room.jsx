@@ -13,6 +13,7 @@ import PresenceList from '../components/presence/PresenceList';
 import ChatPanel from '../components/chat/ChatPanel';
 import JoinRequestsPanel from '../components/room/JoinRequestsPanel';
 import RequestToJoinScreen from '../components/room/RequestToJoinScreen';
+import RoomToasts from '../components/room/RoomToasts';
 import { TextOperation } from '../ot/TextOperation';
 import { OTClient } from '../ot/OTClient';
 
@@ -95,6 +96,7 @@ export default function Room() {
   const [runState, setRunState] = useState('idle'); // 'idle' | 'running'
   const [runOutput, setRunOutput] = useState(null);
   const [messages, setMessages] = useState([]);
+  const [roomToasts, setRoomToasts] = useState([]); // { id, username } — someone arrived
   const [sidebarTab, setSidebarTab] = useState('people'); // 'people' | 'chat' | 'requests'
   const [leavingRoom, setLeavingRoom] = useState(false); // toggles the leave-room confirmation panel
   const [transferTo, setTransferTo] = useState(''); // selected admin userId, owner-leave flow only
@@ -492,12 +494,35 @@ export default function Room() {
       loadRoomData();
     });
 
+    // An existing member opened the room. The presence dot already turns
+    // green on its own, which was too quiet to notice — surface it as both a
+    // transient toast and a line in the chat transcript.
+    //
+    // The chat line is intentionally client-side only and not persisted: it
+    // lives for the session rather than being written to the Message
+    // collection, since people reconnect and refresh constantly and that
+    // would bloat the stored history with noise nobody scrolls back for.
+    socket.on('member:joined', (data) => {
+      if (data.roomId !== roomId) return;
+      const id = `join-${data.userId}-${data.at}`;
+      setRoomToasts((prev) => [...prev, { id, username: data.username }]);
+      setMessages((prev) => [
+        ...prev,
+        { _id: id, system: true, text: `${data.username} joined the room`, createdAt: data.at },
+      ]);
+    });
+
     return () => {
       socket.off('chat:message');
       socket.off('room:updated');
+      socket.off('member:joined');
       socket.emit('chat:leave', roomId);
     };
   }, [socketRef, connected, roomId, loadRoomData]);
+
+  const dismissRoomToast = useCallback((id) => {
+    setRoomToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
 
   const handleSendMessage = useCallback(
     (text) => {
@@ -774,6 +799,8 @@ export default function Room() {
           </div>
         </aside>
       </div>
+
+      <RoomToasts toasts={roomToasts} onDismiss={dismissRoomToast} />
     </div>
   );
 }
