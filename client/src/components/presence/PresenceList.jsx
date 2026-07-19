@@ -23,12 +23,12 @@ export default function PresenceList({
   onDemote,
 }) {
   if (!members.length) {
-    return <p className="text-gray-500 text-xs px-4 py-2">No members yet</p>;
+    return <p className="text-muted-foreground text-xs px-4 py-2">No members yet</p>;
   }
 
   return (
     <div className="flex flex-col gap-2 px-4 py-3">
-      <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
+      <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">
         Members — {members.length}
       </p>
       {members.map((m) => {
@@ -43,18 +43,18 @@ export default function PresenceList({
             >
               {m.username[0].toUpperCase()}
             </span>
-            <span className="text-sm text-gray-300 truncate">{m.username}</span>
+            <span className="text-sm text-foreground/80 truncate">{m.username}</span>
             {isRoomOwner && (
               <span className="text-[10px] uppercase tracking-wide text-amber-400 shrink-0">Owner</span>
             )}
             {isAdmin && !isRoomOwner && (
-              <span className="text-[10px] uppercase tracking-wide text-indigo-400 shrink-0">Admin</span>
+              <span className="text-[10px] uppercase tracking-wide text-primary shrink-0">Admin</span>
             )}
-            {online && <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />}
+            {online && <span className="w-2 h-2 rounded-full bg-primary shrink-0" />}
             {isOwner && !isRoomOwner && (
               <button
                 onClick={() => (isAdmin ? onDemote?.(m._id) : onPromote?.(m._id))}
-                className="ml-auto text-[10px] text-gray-500 hover:text-gray-300 border border-gray-700 hover:border-gray-500 rounded px-1.5 py-0.5 transition-colors shrink-0"
+                className="ml-auto text-[10px] text-muted-foreground hover:text-foreground border border-border hover:border-foreground/30 rounded px-1.5 py-0.5 transition-colors shrink-0"
               >
                 {isAdmin ? 'Remove admin' : 'Make admin'}
               </button>
