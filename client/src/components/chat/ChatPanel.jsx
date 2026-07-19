@@ -36,36 +36,36 @@ export default function ChatPanel({ messages, currentUsername, onSend }) {
     <div className="flex flex-col h-full min-h-0">
       <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto px-4 py-3 flex flex-col gap-3">
         {messages.length === 0 && (
-          <p className="text-gray-500 text-xs">No messages yet — say hi.</p>
+          <p className="text-muted-foreground text-xs">No messages yet — say hi.</p>
         )}
         {messages.map((m) => {
           const isOwn = m.username === currentUsername;
           return (
             <div key={m._id ?? `${m.username}-${m.createdAt}`} className="text-sm">
               <div className="flex items-baseline gap-2">
-                <span className={`font-medium ${isOwn ? 'text-white' : colorFor(m.username)}`}>
+                <span className={`font-medium ${isOwn ? 'text-foreground' : colorFor(m.username)}`}>
                   {isOwn ? 'You' : m.username}
                 </span>
-                <span className="text-[10px] text-gray-600">{formatTime(m.createdAt)}</span>
+                <span className="text-[10px] text-muted-foreground/60">{formatTime(m.createdAt)}</span>
               </div>
-              <p className="text-gray-300 break-words whitespace-pre-wrap">{m.text}</p>
+              <p className="text-foreground/80 break-words whitespace-pre-wrap">{m.text}</p>
             </div>
           );
         })}
       </div>
-      <form onSubmit={handleSubmit} className="border-t border-gray-800 p-3 flex gap-2 shrink-0">
+      <form onSubmit={handleSubmit} className="border-t border-border p-3 flex gap-2 shrink-0">
         <input
           type="text"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder="Message the room…"
           maxLength={2000}
-          className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+          className="flex-1 min-w-0 bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary"
         />
         <button
           type="submit"
           disabled={!draft.trim()}
-          className="text-sm bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:hover:bg-indigo-600 text-white px-3 py-1.5 rounded-lg transition-colors shrink-0"
+          className="text-sm bg-primary hover:bg-primary/90 disabled:opacity-40 disabled:hover:bg-primary text-primary-foreground px-3 py-1.5 rounded-lg transition-colors shrink-0"
         >
           Send
         </button>
