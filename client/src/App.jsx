@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './hooks/useAuth.jsx';
 import LoginForm from './components/auth/LoginForm';
 import Dashboard from './pages/Dashboard';
 import Room from './pages/Room';
+import Landing from './pages/Landing';
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -23,7 +24,7 @@ function PublicRoute({ children }) {
   const location = useLocation();
   if (loading) return null;
   // After login, send the user back to where they were trying to go
-  const dest = location.state?.from || '/';
+  const dest = location.state?.from || '/dashboard';
   return user ? <Navigate to={dest} replace /> : children;
 }
 
@@ -32,6 +33,7 @@ export default function App() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
+          <Route path="/" element={<Landing />} />
           <Route
             path="/login"
             element={
@@ -41,7 +43,7 @@ export default function App() {
             }
           />
           <Route
-            path="/"
+            path="/dashboard"
             element={
               <ProtectedRoute>
                 <Dashboard />
