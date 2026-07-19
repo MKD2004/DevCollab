@@ -1,0 +1,31 @@
+# Keeps the Render free-tier API instance warm.
+#
+# Render spins a free instance down after ~15 minutes without inbound
+# traffic, and the next visitor then waits ~30-60s for it to boot -- which
+# is the first thing anyone clicking the live link would experience.
+# Pinging /api/health often enough keeps it running.
+#
+# Caveats worth knowing:
+#   - GitHub's scheduled workflows are best-effort and can be delayed by
+#     several minutes under load, hence the 10-minute interval rather than
+#     something closer to the 15-minute spin-down window.
+#   - GitHub disables cron workflows on repos with no activity for 60 days.
+#   - A free instance is capped at 750 hours/month; staying up continuously
+#     is ~720, so this fits only while this is the sole free service.
+name: Keep API warm
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch: # so it can be triggered by hand to verify it works
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        run: |
+          # --fail makes a non-2xx a job failure, so a genuinely down API
+          # surfaces as a red run instead of a silently useless green one.
+          curl --fail --silent --show-error --max-time 90 \
+            https://devcollab-server-ljv2.onrender.com/api/health
