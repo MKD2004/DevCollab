@@ -5,10 +5,18 @@ const Branch = require('../models/Branch');
 const authMiddleware = require('../middleware/auth.middleware');
 const { joinCodeLimiter } = require('../middleware/rateLimit');
 const { isRoomOwner } = require('../utils/roomPermissions');
+const { chatRoom } = require('../sockets/roomAuth');
 
 const router = express.Router();
 
 router.use(authMiddleware);
+
+// Tells every already-connected client currently viewing this room (via the
+// chat:join socket room, joined by anyone with the room page open) to
+// refetch — membership/role changed and their local room state is stale.
+function broadcastRoomUpdated(req, roomId) {
+  req.app.get('io')?.to(chatRoom(roomId.toString())).emit('room:updated', { roomId: roomId.toString() });
+}
 
 // POST /api/rooms — create a room, creator is owner + first member
 router.post('/', async (req, res) => {
@@ -60,6 +68,7 @@ router.get('/join/:code', joinCodeLimiter, async (req, res) => {
     if (!isMember) {
       room.members.push(req.user.id);
       await room.save();
+      broadcastRoomUpdated(req, room._id);
     }
 
     res.json({ room });
@@ -140,6 +149,7 @@ router.post('/:id/admins', async (req, res) => {
 
     room.admins.push(userId);
     await room.save();
+    broadcastRoomUpdated(req, room._id);
     res.status(201).json({ admins: room.admins });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -165,6 +175,7 @@ router.delete('/:id/admins/:userId', async (req, res) => {
 
     room.admins = room.admins.filter((a) => a.toString() !== userId);
     await room.save();
+    broadcastRoomUpdated(req, room._id);
     res.json({ admins: room.admins });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -204,12 +215,14 @@ router.post('/:id/leave', async (req, res) => {
       room.admins = room.admins.filter((a) => a.toString() !== newOwnerId);
       room.members = room.members.filter((m) => m.toString() !== req.user.id);
       await room.save();
+      broadcastRoomUpdated(req, room._id);
       return res.json({ message: 'Ownership transferred, left the room' });
     }
 
     room.members = room.members.filter((m) => m.toString() !== req.user.id);
     room.admins = room.admins.filter((a) => a.toString() !== req.user.id);
     await room.save();
+    broadcastRoomUpdated(req, room._id);
     res.json({ message: 'Left the room' });
   } catch (err) {
     res.status(500).json({ message: err.message });

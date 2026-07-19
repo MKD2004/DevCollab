@@ -5,6 +5,7 @@ const JoinRequest = require('../models/JoinRequest');
 const authMiddleware = require('../middleware/auth.middleware');
 const { joinCodeLimiter } = require('../middleware/rateLimit');
 const { isRoomOwnerOrAdmin } = require('../utils/roomPermissions');
+const { chatRoom } = require('../sockets/roomAuth');
 
 const router = express.Router({ mergeParams: true });
 
@@ -132,10 +133,13 @@ router.post('/:requestId/accept', async (req, res) => {
       await room.save();
     }
 
-    req.app.get('io')?.to(`user:${request.userId}`).emit('join-request:resolved', {
+    const io = req.app.get('io');
+    io?.to(`user:${request.userId}`).emit('join-request:resolved', {
       roomId: room._id.toString(),
       status: 'accepted',
     });
+    // Everyone else already viewing this room has a stale member list now.
+    io?.to(chatRoom(room._id.toString())).emit('room:updated', { roomId: room._id.toString() });
 
     res.json({ request });
   } catch (err) {

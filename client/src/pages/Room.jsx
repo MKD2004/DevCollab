@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth.jsx';
-import { useSocket } from '../hooks/useSocket.js';
+import { useSocket } from '../hooks/useSocket.jsx';
 import { getRoom, previewRoom, promoteAdmin, demoteAdmin, leaveRoom } from '../api/rooms';
 import { listBranches, createBranch, renameBranch } from '../api/branches';
 import { getMessages } from '../api/messages';
@@ -485,11 +485,19 @@ export default function Room() {
       setMessages((prev) => [...prev, msg]);
     });
 
+    // Someone's membership/role changed (joined, got promoted/demoted,
+    // ownership transferred) — our local room.members/admins is stale.
+    socket.on('room:updated', (data) => {
+      if (data.roomId !== roomId) return;
+      loadRoomData();
+    });
+
     return () => {
       socket.off('chat:message');
+      socket.off('room:updated');
       socket.emit('chat:leave', roomId);
     };
-  }, [socketRef, connected, roomId]);
+  }, [socketRef, connected, roomId, loadRoomData]);
 
   const handleSendMessage = useCallback(
     (text) => {
