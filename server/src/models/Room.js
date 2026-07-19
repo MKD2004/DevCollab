@@ -29,6 +29,17 @@ const roomSchema = new mongoose.Schema(
         ref: 'User',
       },
     ],
+    // Room members promoted by the owner — get the same privileged actions
+    // as the owner (currently: handling join requests). Owner-only to
+    // promote/demote (see server/src/utils/roomPermissions.js), and never
+    // includes ownerId itself (promoting to owner happens via /leave's
+    // ownership transfer, which removes the user from admins).
+    admins: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+    ],
     joinCode: {
       type: String,
       unique: true,

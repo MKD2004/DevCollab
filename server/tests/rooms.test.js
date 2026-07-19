@@ -212,3 +212,175 @@ describe('GET /api/rooms/join/:code', () => {
     expect(res.status).toBe(403);
   });
 });
+
+// ─── Admins + leave ────────────────────────────────────────────────────────────
+
+async function registerAndLoginWithId(suffix = '') {
+  const res = await request(app).post('/api/auth/register').send({
+    username: `user${suffix}`,
+    email: `user${suffix}@example.com`,
+    password: 'password123',
+  });
+  return { session: extractSession(res), userId: res.body.user.id };
+}
+
+async function joinByCode(session, joinCode) {
+  return authed(request(app).get(`/api/rooms/join/${joinCode}`), session);
+}
+
+describe('POST /api/rooms/:id/admins', () => {
+  it('promotes an existing member to admin', async () => {
+    const owner = await registerAndLoginWithId('t1');
+    const bob = await registerAndLoginWithId('t2');
+    const created = await createRoom(owner.session, 'Admin Room 1');
+    const roomId = created.body.room._id;
+    await joinByCode(bob.session, created.body.room.joinCode);
+
+    const res = await authed(request(app).post(`/api/rooms/${roomId}/admins`), owner.session).send({
+      userId: bob.userId,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.admins).toContain(bob.userId);
+  });
+
+  it('rejects promoting a non-member', async () => {
+    const owner = await registerAndLoginWithId('t3');
+    const outsider = await registerAndLoginWithId('t4');
+    const created = await createRoom(owner.session, 'Admin Room 2');
+    const roomId = created.body.room._id;
+
+    const res = await authed(request(app).post(`/api/rooms/${roomId}/admins`), owner.session).send({
+      userId: outsider.userId,
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects promoting the owner', async () => {
+    const owner = await registerAndLoginWithId('t5');
+    const created = await createRoom(owner.session, 'Admin Room 3');
+    const roomId = created.body.room._id;
+
+    const res = await authed(request(app).post(`/api/rooms/${roomId}/admins`), owner.session).send({
+      userId: owner.userId,
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a double-promote', async () => {
+    const owner = await registerAndLoginWithId('t6');
+    const bob = await registerAndLoginWithId('t7');
+    const created = await createRoom(owner.session, 'Admin Room 4');
+    const roomId = created.body.room._id;
+    await joinByCode(bob.session, created.body.room.joinCode);
+    await authed(request(app).post(`/api/rooms/${roomId}/admins`), owner.session).send({ userId: bob.userId });
+
+    const res = await authed(request(app).post(`/api/rooms/${roomId}/admins`), owner.session).send({
+      userId: bob.userId,
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a non-owner', async () => {
+    const owner = await registerAndLoginWithId('t8');
+    const bob = await registerAndLoginWithId('t9');
+    const created = await createRoom(owner.session, 'Admin Room 5');
+    const roomId = created.body.room._id;
+    await joinByCode(bob.session, created.body.room.joinCode);
+
+    const res = await authed(request(app).post(`/api/rooms/${roomId}/admins`), bob.session).send({
+      userId: bob.userId,
+    });
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('DELETE /api/rooms/:id/admins/:userId', () => {
+  it('demotes an admin', async () => {
+    const owner = await registerAndLoginWithId('t10');
+    const bob = await registerAndLoginWithId('t11');
+    const created = await createRoom(owner.session, 'Admin Room 6');
+    const roomId = created.body.room._id;
+    await joinByCode(bob.session, created.body.room.joinCode);
+    await authed(request(app).post(`/api/rooms/${roomId}/admins`), owner.session).send({ userId: bob.userId });
+
+    const res = await authed(request(app).delete(`/api/rooms/${roomId}/admins/${bob.userId}`), owner.session);
+    expect(res.status).toBe(200);
+    expect(res.body.admins).not.toContain(bob.userId);
+  });
+
+  it('returns 404 demoting someone who is not an admin', async () => {
+    const owner = await registerAndLoginWithId('t12');
+    const bob = await registerAndLoginWithId('t13');
+    const created = await createRoom(owner.session, 'Admin Room 7');
+    const roomId = created.body.room._id;
+    await joinByCode(bob.session, created.body.room.joinCode);
+
+    const res = await authed(request(app).delete(`/api/rooms/${roomId}/admins/${bob.userId}`), owner.session);
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('POST /api/rooms/:id/leave', () => {
+  it('lets a plain member leave', async () => {
+    const owner = await registerAndLoginWithId('t14');
+    const bob = await registerAndLoginWithId('t15');
+    const created = await createRoom(owner.session, 'Leave Room 1');
+    const roomId = created.body.room._id;
+    await joinByCode(bob.session, created.body.room.joinCode);
+
+    const res = await authed(request(app).post(`/api/rooms/${roomId}/leave`), bob.session);
+    expect(res.status).toBe(200);
+
+    const roomAfter = await authed(request(app).get(`/api/rooms/${roomId}`), owner.session);
+    expect(roomAfter.body.room.members).toHaveLength(1);
+  });
+
+  it('blocks the owner from leaving with zero admins', async () => {
+    const owner = await registerAndLoginWithId('t16');
+    const created = await createRoom(owner.session, 'Leave Room 2');
+    const roomId = created.body.room._id;
+
+    const res = await authed(request(app).post(`/api/rooms/${roomId}/leave`), owner.session);
+    expect(res.status).toBe(400);
+  });
+
+  it('blocks the owner from leaving with an invalid newOwnerId', async () => {
+    const owner = await registerAndLoginWithId('t17');
+    const bob = await registerAndLoginWithId('t18');
+    const created = await createRoom(owner.session, 'Leave Room 3');
+    const roomId = created.body.room._id;
+    await joinByCode(bob.session, created.body.room.joinCode);
+    await authed(request(app).post(`/api/rooms/${roomId}/admins`), owner.session).send({ userId: bob.userId });
+
+    const res = await authed(request(app).post(`/api/rooms/${roomId}/leave`), owner.session).send({
+      newOwnerId: new mongoose.Types.ObjectId().toString(),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('transfers ownership and lets the old owner leave', async () => {
+    const owner = await registerAndLoginWithId('t19');
+    const bob = await registerAndLoginWithId('t20');
+    const created = await createRoom(owner.session, 'Leave Room 4');
+    const roomId = created.body.room._id;
+    await joinByCode(bob.session, created.body.room.joinCode);
+    await authed(request(app).post(`/api/rooms/${roomId}/admins`), owner.session).send({ userId: bob.userId });
+
+    const res = await authed(request(app).post(`/api/rooms/${roomId}/leave`), owner.session).send({
+      newOwnerId: bob.userId,
+    });
+    expect(res.status).toBe(200);
+
+    // New owner can now do owner-only things (e.g. promote another admin).
+    const carol = await registerAndLoginWithId('t21');
+    await joinByCode(carol.session, created.body.room.joinCode);
+    const promote = await authed(request(app).post(`/api/rooms/${roomId}/admins`), bob.session).send({
+      userId: carol.userId,
+    });
+    expect(promote.status).toBe(201);
+
+    // Old owner is no longer a member.
+    const oldOwnerCheck = await authed(request(app).get(`/api/rooms/${roomId}`), owner.session);
+    expect(oldOwnerCheck.status).toBe(403);
+  });
+});

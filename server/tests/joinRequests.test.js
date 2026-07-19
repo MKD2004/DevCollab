@@ -227,3 +227,50 @@ describe('GET /api/rooms/:id/preview', () => {
     expect(res.status).toBe(401);
   });
 });
+
+// ─── Admins can handle join requests too (not just the owner) ─────────────────
+
+async function registerAndLoginWithId(suffix = '') {
+  const res = await request(app).post('/api/auth/register').send({
+    username: `user${suffix}`,
+    email: `user${suffix}@example.com`,
+    password: 'password123',
+  });
+  return { session: extractSession(res), userId: res.body.user.id };
+}
+
+describe('admins can act on join requests', () => {
+  it('lets an admin list and accept a request the owner never touched', async () => {
+    const owner = await registerAndLoginWithId('x1');
+    const admin = await registerAndLoginWithId('x2');
+    const bob = await registerAndLoginWithId('x3');
+    const created = await createRoom(owner.session, 'Admin JR Room');
+    const roomId = created.body.room._id;
+
+    await authed(request(app).get(`/api/rooms/join/${created.body.room.joinCode}`), admin.session);
+    await authed(request(app).post(`/api/rooms/${roomId}/admins`), owner.session).send({ userId: admin.userId });
+
+    await requestToJoin(bob.session, roomId);
+
+    const list = await authed(request(app).get(`/api/rooms/${roomId}/join-requests`), admin.session);
+    expect(list.status).toBe(200);
+    expect(list.body.requests).toHaveLength(1);
+
+    const accept = await authed(
+      request(app).post(`/api/rooms/${roomId}/join-requests/${list.body.requests[0]._id}/accept`),
+      admin.session
+    );
+    expect(accept.status).toBe(200);
+  });
+
+  it('still rejects a plain member who is not an admin', async () => {
+    const owner = await registerAndLoginWithId('x4');
+    const plainMember = await registerAndLoginWithId('x5');
+    const created = await createRoom(owner.session, 'Non-Admin JR Room');
+    const roomId = created.body.room._id;
+    await authed(request(app).get(`/api/rooms/join/${created.body.room.joinCode}`), plainMember.session);
+
+    const res = await authed(request(app).get(`/api/rooms/${roomId}/join-requests`), plainMember.session);
+    expect(res.status).toBe(403);
+  });
+});

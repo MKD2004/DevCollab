@@ -4,6 +4,7 @@ const Room = require('../models/Room');
 const JoinRequest = require('../models/JoinRequest');
 const authMiddleware = require('../middleware/auth.middleware');
 const { joinCodeLimiter } = require('../middleware/rateLimit');
+const { isRoomOwnerOrAdmin } = require('../utils/roomPermissions');
 
 const router = express.Router({ mergeParams: true });
 
@@ -27,12 +28,6 @@ async function loadRoomById(req, res) {
   }
 
   return room;
-}
-
-// The one place ownership is checked — intentionally isolated so a future
-// "room admins" feature only needs to change this function.
-function isRoomOwner(room, userId) {
-  return room.ownerId.toString() === userId;
 }
 
 // POST /api/rooms/:roomId/join-requests — request to join a room you're
@@ -63,11 +58,18 @@ router.post('/', joinCodeLimiter, async (req, res) => {
       username: req.user.username,
     });
 
-    req.app.get('io')?.to(`user:${room.ownerId}`).emit('join-request:created', {
-      roomId: room._id.toString(),
-      requestId: request._id.toString(),
-      username: req.user.username,
-    });
+    const io = req.app.get('io');
+    if (io) {
+      const payload = {
+        roomId: room._id.toString(),
+        requestId: request._id.toString(),
+        username: req.user.username,
+      };
+      // Owner and every current admin can act on this — all get the nudge.
+      for (const managerId of [room.ownerId, ...room.admins]) {
+        io.to(`user:${managerId}`).emit('join-request:created', payload);
+      }
+    }
 
     res.status(201).json({ request });
   } catch (err) {
@@ -84,14 +86,14 @@ router.post('/', joinCodeLimiter, async (req, res) => {
   }
 });
 
-// GET /api/rooms/:roomId/join-requests — owner-only, lists pending requests.
+// GET /api/rooms/:roomId/join-requests — owner or admin, lists pending requests.
 router.get('/', async (req, res) => {
   try {
     const room = await loadRoomById(req, res);
     if (!room) return;
 
-    if (!isRoomOwner(room, req.user.id)) {
-      return res.status(403).json({ message: 'Only the room owner can view join requests' });
+    if (!isRoomOwnerOrAdmin(room, req.user.id)) {
+      return res.status(403).json({ message: 'Only the room owner or an admin can view join requests' });
     }
 
     const requests = await JoinRequest.find({ roomId: room._id, status: 'pending' }).sort({ createdAt: 1 });
@@ -101,14 +103,14 @@ router.get('/', async (req, res) => {
   }
 });
 
-// POST /api/rooms/:roomId/join-requests/:requestId/accept — owner-only.
+// POST /api/rooms/:roomId/join-requests/:requestId/accept — owner or admin.
 router.post('/:requestId/accept', async (req, res) => {
   try {
     const room = await loadRoomById(req, res);
     if (!room) return;
 
-    if (!isRoomOwner(room, req.user.id)) {
-      return res.status(403).json({ message: 'Only the room owner can accept join requests' });
+    if (!isRoomOwnerOrAdmin(room, req.user.id)) {
+      return res.status(403).json({ message: 'Only the room owner or an admin can accept join requests' });
     }
 
     if (!mongoose.Types.ObjectId.isValid(req.params.requestId)) {
@@ -141,14 +143,14 @@ router.post('/:requestId/accept', async (req, res) => {
   }
 });
 
-// POST /api/rooms/:roomId/join-requests/:requestId/decline — owner-only.
+// POST /api/rooms/:roomId/join-requests/:requestId/decline — owner or admin.
 router.post('/:requestId/decline', async (req, res) => {
   try {
     const room = await loadRoomById(req, res);
     if (!room) return;
 
-    if (!isRoomOwner(room, req.user.id)) {
-      return res.status(403).json({ message: 'Only the room owner can decline join requests' });
+    if (!isRoomOwnerOrAdmin(room, req.user.id)) {
+      return res.status(403).json({ message: 'Only the room owner or an admin can decline join requests' });
     }
 
     if (!mongoose.Types.ObjectId.isValid(req.params.requestId)) {
