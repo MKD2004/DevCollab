@@ -7,18 +7,24 @@ const api = axios.create({
   withCredentials: true,
 });
 
-// csrfToken is a deliberately non-httpOnly cookie (see server/src/config/
-// authCookies.js) — readable here so it can be echoed back as a header,
-// proving the request came from this app and not a cross-site forgery.
-function readCookie(name) {
-  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
-  return match ? decodeURIComponent(match[1]) : null;
-}
+// The CSRF cookie itself is unreadable from here once frontend and API are
+// on different domains — document.cookie only ever exposes cookies for the
+// current page's own origin, never a cross-domain API's (this "worked" in
+// local dev only because localhost:5173 and localhost:5000 share a
+// hostname). The server hands the value back in the response body instead
+// (register/login/me — see auth.routes.js), which this module holds onto
+// and echoes as a header on every mutating request, proving the request
+// came from this app and not a cross-site forgery.
+let csrfToken = null;
 
 api.interceptors.request.use((config) => {
-  const csrfToken = readCookie('csrfToken');
   if (csrfToken) config.headers['X-CSRF-Token'] = csrfToken;
   return config;
+});
+
+api.interceptors.response.use((res) => {
+  if (res.data?.csrfToken) csrfToken = res.data.csrfToken;
+  return res;
 });
 
 export const register = (data) => api.post('/api/auth/register', data);

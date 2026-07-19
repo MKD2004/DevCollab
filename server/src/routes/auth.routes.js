@@ -44,9 +44,10 @@ router.post('/register', authLimiter, async (req, res) => {
     const user = await User.create({ username, email, passwordHash });
     const token = signToken(user);
 
-    setAuthCookies(res, token);
+    const csrfToken = setAuthCookies(res, token);
     res.status(201).json({
       user: { id: user._id, username: user.username, email: user.email },
+      csrfToken,
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -74,9 +75,10 @@ router.post('/login', authLimiter, async (req, res) => {
 
     const token = signToken(user);
 
-    setAuthCookies(res, token);
+    const csrfToken = setAuthCookies(res, token);
     res.json({
       user: { id: user._id, username: user.username, email: user.email },
+      csrfToken,
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -89,12 +91,15 @@ router.post('/logout', (req, res) => {
   res.json({ message: 'Logged out' });
 });
 
-// GET /api/auth/me — protected route
+// GET /api/auth/me — protected route. Also hands back the current CSRF
+// token so a page reload (which loses the client's in-memory copy) can
+// recover it — the client can't read it straight off the cookie itself
+// once frontend and API are on different domains, see authCookies.js.
 router.get('/me', authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select('-passwordHash');
     if (!user) return res.status(404).json({ message: 'User not found' });
-    res.json({ user });
+    res.json({ user, csrfToken: req.cookies.csrfToken });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
