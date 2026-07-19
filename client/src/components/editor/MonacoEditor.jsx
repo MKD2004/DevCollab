@@ -135,12 +135,12 @@ export default function MonacoEditor({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center gap-3 px-4 py-2 bg-gray-900 border-b border-gray-700">
-        <span className="text-gray-400 text-sm">Language:</span>
+      <div className="flex items-center gap-3 px-4 py-2 bg-card border-b border-border">
+        <span className="text-muted-foreground text-sm">Language:</span>
         <select
           value={language}
           onChange={(e) => onLanguageChange?.(e.target.value)}
-          className="bg-gray-800 text-white text-sm border border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          className="bg-secondary text-foreground text-sm border border-border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
         >
           {LANGUAGES.map((l) => (
             <option key={l} value={l}>
@@ -152,7 +152,7 @@ export default function MonacoEditor({
         <button
           onClick={() => onRun?.()}
           disabled={isRunning}
-          className="text-xs bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium px-3 py-1 rounded-lg transition-colors"
+          className="text-xs bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground font-medium px-3 py-1 rounded-lg transition-colors"
         >
           {isRunning ? 'Running…' : 'Run ▶'}
         </button>
