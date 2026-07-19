@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth.jsx';
 import { useSocket } from '../hooks/useSocket.js';
 import { getRoom, previewRoom } from '../api/rooms';
-import { listBranches, createBranch } from '../api/branches';
+import { listBranches, createBranch, renameBranch } from '../api/branches';
 import { getMessages } from '../api/messages';
 import { requestToJoin, listJoinRequests, acceptJoinRequest, declineJoinRequest } from '../api/joinRequests';
 import MonacoEditor, { DEFAULT_CODE } from '../components/editor/MonacoEditor';
@@ -285,6 +285,19 @@ export default function Room() {
       }
     },
     [roomId, currentBranchId],
+  );
+
+  const handleRenameBranch = useCallback(
+    async (branchId, name) => {
+      try {
+        const res = await renameBranch(roomId, branchId, name);
+        const updated = res.data.branch;
+        setBranches((prev) => prev.map((b) => (b._id === branchId ? updated : b)));
+      } catch {
+        // Best-effort — e.g. a name collision just leaves the old name in place.
+      }
+    },
+    [roomId],
   );
 
   // Socket: presence + OT editor sync + cursors, scoped to the current branch.
@@ -580,6 +593,7 @@ export default function Room() {
                   currentBranchId={currentBranchId}
                   onSwitch={setCurrentBranchId}
                   onCreate={handleCreateBranch}
+                  onRename={handleRenameBranch}
                 />
               }
               onRun={handleRun}

@@ -189,3 +189,101 @@ describe('GET /api/rooms/:roomId/branches', () => {
     expect(res.status).toBe(401);
   });
 });
+
+// ─── PATCH /api/rooms/:roomId/branches/:branchId ───────────────────────────────
+
+describe('PATCH /api/rooms/:roomId/branches/:branchId', () => {
+  it('renames a branch', async () => {
+    const session = await registerAndLogin('n');
+    const created = await createRoom(session, 'Room N');
+    const roomId = created.body.room._id;
+    const branchRes = await authed(request(app).post(`/api/rooms/${roomId}/branches`), session).send({
+      name: 'old-name',
+    });
+    const branchId = branchRes.body.branch._id;
+
+    const res = await authed(request(app).patch(`/api/rooms/${roomId}/branches/${branchId}`), session).send({
+      name: 'new-name',
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.branch.name).toBe('new-name');
+  });
+
+  it('allows renaming the default main branch', async () => {
+    const session = await registerAndLogin('o');
+    const created = await createRoom(session, 'Room O');
+    const roomId = created.body.room._id;
+    const mainBranch = await getMainBranch(session, roomId);
+
+    const res = await authed(request(app).patch(`/api/rooms/${roomId}/branches/${mainBranch._id}`), session).send({
+      name: 'trunk',
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.branch.name).toBe('trunk');
+    expect(res.body.branch.isDefault).toBe(true);
+  });
+
+  it('rejects a rename that collides with an existing branch name in the room', async () => {
+    const session = await registerAndLogin('p');
+    const created = await createRoom(session, 'Room P');
+    const roomId = created.body.room._id;
+    const branchRes = await authed(request(app).post(`/api/rooms/${roomId}/branches`), session).send({
+      name: 'feature-1',
+    });
+    const branchId = branchRes.body.branch._id;
+
+    const res = await authed(request(app).patch(`/api/rooms/${roomId}/branches/${branchId}`), session).send({
+      name: 'main',
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it('rejects an empty name', async () => {
+    const session = await registerAndLogin('q');
+    const created = await createRoom(session, 'Room Q');
+    const roomId = created.body.room._id;
+    const mainBranch = await getMainBranch(session, roomId);
+
+    const res = await authed(request(app).patch(`/api/rooms/${roomId}/branches/${mainBranch._id}`), session).send({
+      name: '   ',
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects non-members', async () => {
+    const sessionA = await registerAndLogin('r');
+    const sessionB = await registerAndLogin('s');
+    const created = await createRoom(sessionA, 'Room R');
+    const roomId = created.body.room._id;
+    const mainBranch = await getMainBranch(sessionA, roomId);
+
+    const res = await authed(request(app).patch(`/api/rooms/${roomId}/branches/${mainBranch._id}`), sessionB).send({
+      name: 'hijacked',
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it('returns 404 for a nonexistent branch', async () => {
+    const session = await registerAndLogin('t');
+    const created = await createRoom(session, 'Room T');
+    const roomId = created.body.room._id;
+    const fakeBranchId = new mongoose.Types.ObjectId();
+
+    const res = await authed(request(app).patch(`/api/rooms/${roomId}/branches/${fakeBranchId}`), session).send({
+      name: 'x',
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('rejects unauthenticated request', async () => {
+    const session = await registerAndLogin('u');
+    const created = await createRoom(session, 'Room U');
+    const roomId = created.body.room._id;
+    const mainBranch = await getMainBranch(session, roomId);
+
+    const res = await request(app)
+      .patch(`/api/rooms/${roomId}/branches/${mainBranch._id}`)
+      .send({ name: 'x' });
+    expect(res.status).toBe(401);
+  });
+});

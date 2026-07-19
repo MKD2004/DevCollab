@@ -95,4 +95,41 @@ router.get('/', async (req, res) => {
   }
 });
 
+// PATCH /api/rooms/:roomId/branches/:branchId — rename a branch. Any room
+// member can rename any branch (same permission level as creating one) —
+// renaming main is allowed too, same as git.
+router.patch('/:branchId', async (req, res) => {
+  try {
+    const room = await loadRoomForMember(req, res);
+    if (!room) return;
+
+    const { branchId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(branchId)) {
+      return res.status(404).json({ message: 'Branch not found' });
+    }
+
+    const { name } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: 'Branch name is required' });
+    }
+
+    const branch = await Branch.findOne({ _id: branchId, roomId: room._id });
+    if (!branch) return res.status(404).json({ message: 'Branch not found' });
+
+    branch.name = name.trim();
+    try {
+      await branch.save();
+    } catch (err) {
+      if (err.code === 11000) {
+        return res.status(409).json({ message: 'A branch with that name already exists in this room' });
+      }
+      throw err;
+    }
+
+    res.json({ branch });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 module.exports = router;
