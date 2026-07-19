@@ -45,6 +45,11 @@ function createSocketServer(httpServer) {
   });
 
   io.on('connection', (socket) => {
+    // Personal room — lets REST routes (e.g. join-requests) reach every
+    // open tab/connection this user has via io.to(`user:<id>`), independent
+    // of the room/branch membership auth in roomAuth.js.
+    socket.join(`user:${socket.data.user.id}`);
+
     registerRoomAuth(io, socket);
     registerPresenceEvents(io, socket);
     registerEditorEvents(io, socket);

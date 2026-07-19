@@ -6,6 +6,9 @@ const { attachRedisAdapter } = require('./sockets');
 
 const httpServer = http.createServer(app);
 const io = createSocketServer(httpServer);
+// Lets REST routes (e.g. join-requests) push a socket event after a DB
+// write, without the socket layer depending on Express or vice versa.
+app.set('io', io);
 
 Promise.all([connectDB(), attachRedisAdapter(io)]).then(([, redisClients]) => {
   if (redisClients) console.log('Socket.io Redis adapter connected');

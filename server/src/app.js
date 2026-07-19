@@ -7,6 +7,7 @@ const authRoutes = require('./routes/auth.routes');
 const roomsRoutes = require('./routes/rooms.routes');
 const branchesRoutes = require('./routes/branches.routes');
 const messagesRoutes = require('./routes/messages.routes');
+const joinRequestsRoutes = require('./routes/joinRequests.routes');
 const { corsOptions } = require('./config/cors');
 const csrfProtection = require('./middleware/csrf.middleware');
 
@@ -33,6 +34,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/rooms', roomsRoutes);
 app.use('/api/rooms/:roomId/branches', branchesRoutes);
 app.use('/api/rooms/:roomId/messages', messagesRoutes);
+app.use('/api/rooms/:roomId/join-requests', joinRequestsRoutes);
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
 

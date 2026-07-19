@@ -89,4 +89,22 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+// GET /api/rooms/:id/preview — minimal info (name only) for any
+// authenticated user, member or not. Lets a non-member see what they'd be
+// requesting to join without leaking the join code or member list.
+router.get('/:id/preview', joinCodeLimiter, async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(404).json({ message: 'Room not found' });
+    }
+
+    const room = await Room.findById(req.params.id).select('name');
+    if (!room) return res.status(404).json({ message: 'Room not found' });
+
+    res.json({ room: { _id: room._id, name: room.name } });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 module.exports = router;
