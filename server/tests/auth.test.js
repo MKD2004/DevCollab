@@ -76,6 +76,25 @@ describe('POST /api/auth/register', () => {
       .send({ username: 'user', email: 'u@example.com', password: '123' });
     expect(res.status).toBe(400);
   });
+
+  it('rejects a Mongo operator object in place of email instead of using it as a query filter', async () => {
+    await request(app).post('/api/auth/register').send(validUser);
+    const res = await request(app).post('/api/auth/register').send({
+      username: 'attacker',
+      email: { $regex: '^' }, // would match any existing user's email if used raw in a query
+      password: 'password123',
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a Mongo operator object in place of username', async () => {
+    const res = await request(app).post('/api/auth/register').send({
+      username: { $ne: null },
+      email: 'attacker@example.com',
+      password: 'password123',
+    });
+    expect(res.status).toBe(400);
+  });
 });
 
 // ─── Login ────────────────────────────────────────────────────────────────────
@@ -109,6 +128,13 @@ describe('POST /api/auth/login', () => {
       .post('/api/auth/login')
       .send({ email: 'ghost@example.com', password: 'whatever' });
     expect(res.status).toBe(401);
+  });
+
+  it('rejects a Mongo operator object in place of email', async () => {
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ email: { $ne: null }, password: { $ne: null } });
+    expect(res.status).toBe(400);
   });
 });
 

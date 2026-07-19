@@ -18,6 +18,13 @@ router.post('/register', authLimiter, async (req, res) => {
   try {
     const { username, email, password } = req.body;
 
+    // Reject non-strings outright — without this, a body like
+    // { "email": { "$regex": "^" } } would pass an object straight into the
+    // $or query below as a Mongo operator instead of a literal value.
+    if (typeof username !== 'string' || typeof email !== 'string' || typeof password !== 'string') {
+      return res.status(400).json({ message: 'All fields are required' });
+    }
+
     if (!username || !email || !password) {
       return res.status(400).json({ message: 'All fields are required' });
     }
@@ -50,7 +57,7 @@ router.post('/login', authLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    if (!email || !password) {
+    if (typeof email !== 'string' || typeof password !== 'string' || !email || !password) {
       return res.status(400).json({ message: 'Email and password are required' });
     }
 
