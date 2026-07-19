@@ -1,4 +1,9 @@
-const PISTON_EXECUTE_URL = 'https://emkc.org/api/v2/piston/execute';
+// Self-hosted by default (docker-compose.yml at repo root) — the public
+// emkc.org API went whitelist-only on 2/15/2026 and now rejects
+// unregistered callers with a 401. Override via PISTON_URL if hosting
+// elsewhere.
+const PISTON_BASE_URL = process.env.PISTON_URL || 'http://localhost:2000/api/v2';
+const PISTON_EXECUTE_URL = `${PISTON_BASE_URL}/execute`;
 
 // Maps the app's editor language selector values to Piston's runtime slugs.
 const LANGUAGE_MAP = {

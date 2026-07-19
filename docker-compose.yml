@@ -1,0 +1,19 @@
+services:
+  # Self-hosted Piston code execution engine — the public emkc.org API went
+  # whitelist-only on 2/15/2026 and now rejects unregistered callers with a
+  # 401. Runs locally instead: no rate limits, no whitelist, no external
+  # dependency. See server/src/services/piston.js for the client that talks
+  # to this on PISTON_URL (defaults to http://localhost:2000).
+  piston:
+    image: ghcr.io/engineer-man/piston
+    restart: unless-stopped
+    privileged: true
+    ports:
+      - '2000:2000'
+    volumes:
+      - piston_data:/piston
+      - piston_packages:/piston/packages
+
+volumes:
+  piston_data:
+  piston_packages:
