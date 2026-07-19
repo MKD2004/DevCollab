@@ -134,6 +134,32 @@ describe('code:run', () => {
     socketB.disconnect();
   });
 
+  it('throttles rapid repeat runs from the same user instead of hammering Piston', async () => {
+    piston.executeCode.mockResolvedValue({ stdout: 'ok', stderr: '', exitCode: 0, compileOutput: '' });
+
+    const idT = new mongoose.Types.ObjectId().toString();
+    const socket = await connect(makeToken({ id: idT, username: 'throttled' }));
+    const roomId = await makeBranch([idT]);
+
+    await new Promise((resolve) => {
+      socket.emit('room:join', roomId);
+      setTimeout(resolve, 50);
+    });
+
+    const firstResult = new Promise((resolve) => socket.once('code:result', resolve));
+    socket.emit('code:run', { roomId, code: 'a', language: 'python' });
+    await firstResult;
+
+    const throttleError = new Promise((resolve) => socket.once('code:error', resolve));
+    socket.emit('code:run', { roomId, code: 'b', language: 'python' });
+    const error = await throttleError;
+
+    expect(error.message).toMatch(/wait/i);
+    expect(piston.executeCode).toHaveBeenCalledTimes(1);
+
+    socket.disconnect();
+  });
+
   it('emits code:error when Piston execution fails, without a code:result', async () => {
     piston.executeCode.mockRejectedValue(new Error('boom'));
 

@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const Room = require('../models/Room');
 const Branch = require('../models/Branch');
 const authMiddleware = require('../middleware/auth.middleware');
+const { joinCodeLimiter } = require('../middleware/rateLimit');
 
 const router = express.Router();
 
@@ -46,7 +47,7 @@ router.get('/', async (req, res) => {
 
 // GET /api/rooms/join/:code — find and auto-join a room by its join code
 // Must be before /:id so Express doesn't treat "join" as an ObjectId
-router.get('/join/:code', async (req, res) => {
+router.get('/join/:code', joinCodeLimiter, async (req, res) => {
   try {
     const room = await Room.findOne({
       joinCode: req.params.code.toUpperCase(),
