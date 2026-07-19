@@ -17,26 +17,29 @@ function getOrCreateOTDoc(roomId) {
   return doc;
 }
 
-function registerEditorEvents(io, socket) {
-  socket.on('room:join', (roomId) => {
-    const otDoc = roomOTDocs.get(roomId);
-    if (otDoc) {
-      socket.emit('code:sync', {
-        roomId,
-        content: otDoc.content,
-        language: otDoc.language,
-        revision: otDoc.revision,
-      });
-      return;
-    }
-    const state = roomEditorState.get(roomId);
-    if (state) {
-      socket.emit('code:sync', { roomId, content: state.content, language: state.language });
-    }
-  });
+// Called by roomAuth once a `room:join` has been authorized. Pushes the
+// current document (if any) to the joining socket.
+function handleBranchJoin(io, socket, roomId) {
+  const otDoc = roomOTDocs.get(roomId);
+  if (otDoc) {
+    socket.emit('code:sync', {
+      roomId,
+      content: otDoc.content,
+      language: otDoc.language,
+      revision: otDoc.revision,
+    });
+    return;
+  }
+  const state = roomEditorState.get(roomId);
+  if (state) {
+    socket.emit('code:sync', { roomId, content: state.content, language: state.language });
+  }
+}
 
+function registerEditorEvents(io, socket) {
   socket.on('code:change', ({ roomId, content, language }) => {
     if (typeof roomId !== 'string' || typeof content !== 'string') return;
+    if (!socket.data.authorizedBranches?.has(roomId)) return;
     roomEditorState.set(roomId, { content, language: language || 'javascript' });
     socket.to(roomId).emit('code:change', { roomId, content, language });
   });
@@ -46,6 +49,7 @@ function registerEditorEvents(io, socket) {
   // operations it missed, applies it, and broadcasts the transformed op.
   socket.on('code:op', ({ roomId, revision, operation, language }) => {
     if (typeof roomId !== 'string' || typeof revision !== 'number' || !Array.isArray(operation)) return;
+    if (!socket.data.authorizedBranches?.has(roomId)) return;
 
     const otDoc = getOrCreateOTDoc(roomId);
     if (language) otDoc.language = language;
@@ -76,6 +80,7 @@ function registerEditorEvents(io, socket) {
 
   socket.on('cursor:move', ({ roomId, position }) => {
     if (typeof roomId !== 'string' || !position) return;
+    if (!socket.data.authorizedBranches?.has(roomId)) return;
     socket.to(roomId).emit('cursor:move', {
       roomId,
       userId: socket.data.user.id,
@@ -112,4 +117,4 @@ function seedOTDocState(roomId, content, language) {
   roomOTDocs.set(roomId, new OTDocument(content, language));
 }
 
-module.exports = { registerEditorEvents, getOTDocState, seedOTDocState };
+module.exports = { registerEditorEvents, getOTDocState, seedOTDocState, handleBranchJoin };

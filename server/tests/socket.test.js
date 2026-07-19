@@ -10,8 +10,18 @@ process.env.NODE_ENV = 'test';
 
 const app = require('../src/app');
 const createSocketServer = require('../src/sockets');
+const Room = require('../src/models/Room');
+const Branch = require('../src/models/Branch');
 
 let mongod, httpServer, io, port;
+
+// Creates a real Room + default Branch with `memberId` as a member, so
+// membership-gated socket events (room:join, etc.) authorize successfully.
+async function createTestRoom(memberId) {
+  const room = await Room.create({ name: 'test room', ownerId: memberId, members: [memberId] });
+  const branch = await Branch.create({ roomId: room._id, name: 'main', createdBy: memberId, isDefault: true });
+  return { room, branch };
+}
 
 beforeAll(async () => {
   mongod = await MongoMemoryServer.create();
@@ -87,20 +97,22 @@ describe('Socket.io JWT auth middleware', () => {
 // ─── Presence ─────────────────────────────────────────────────────────────────
 
 describe('Socket.io presence events', () => {
-  function makeAuthedClient() {
+  function makeAuthedClient(userId) {
+    const id = userId ?? new mongoose.Types.ObjectId().toString();
     const token = jwt.sign(
-      { id: new mongoose.Types.ObjectId().toString(), username: `user_${Date.now()}`, email: `u${Date.now()}@t.com` },
+      { id, username: `user_${Date.now()}`, email: `u${Date.now()}@t.com` },
       process.env.JWT_SECRET,
       { expiresIn: '1h' }
     );
-    return makeClient(token);
+    return { client: makeClient(token), userId: id };
   }
 
   it('broadcasts presence:update when a user joins a room', async () => {
-    const client = makeAuthedClient();
+    const { client, userId } = makeAuthedClient();
     await connectClient(client);
 
-    const roomId = new mongoose.Types.ObjectId().toString();
+    const { branch } = await createTestRoom(userId);
+    const roomId = branch._id.toString();
 
     const presencePromise = new Promise((resolve) => {
       client.once('presence:update', resolve);
@@ -115,12 +127,15 @@ describe('Socket.io presence events', () => {
   });
 
   it('removes user from presence on disconnect', async () => {
-    const clientA = makeAuthedClient();
-    const clientB = makeAuthedClient();
+    const { client: clientA, userId: userIdA } = makeAuthedClient();
+    const { client: clientB, userId: userIdB } = makeAuthedClient();
     await connectClient(clientA);
     await connectClient(clientB);
 
-    const roomId = new mongoose.Types.ObjectId().toString();
+    const { room, branch } = await createTestRoom(userIdA);
+    room.members.push(userIdB);
+    await room.save();
+    const roomId = branch._id.toString();
 
     // Both join, wait for A to see B in the room
     clientA.emit('room:join', roomId);

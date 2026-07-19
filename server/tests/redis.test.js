@@ -1,6 +1,8 @@
 const http = require('http');
 const jwt = require('jsonwebtoken');
 const { io: ioc } = require('socket.io-client');
+const { MongoMemoryServer } = require('mongodb-memory-server');
+const mongoose = require('mongoose');
 
 require('dotenv').config();
 process.env.JWT_SECRET = 'test-secret-key-for-jest';
@@ -8,6 +10,17 @@ process.env.NODE_ENV = 'test';
 
 const createSocketServer = require('../src/sockets');
 const { attachRedisAdapter } = require('../src/sockets');
+const Room = require('../src/models/Room');
+const Branch = require('../src/models/Branch');
+
+// Creates a real Room + Branch with the given member ids, so room:join
+// authorization succeeds. Returns the branch id as a string.
+async function makeBranch(memberIds) {
+  const owner = memberIds[0];
+  const room = await Room.create({ name: 'redis test room', ownerId: owner, members: memberIds });
+  const branch = await Branch.create({ roomId: room._id, name: `b-${Date.now()}-${Math.random()}`, createdBy: owner });
+  return branch._id.toString();
+}
 
 // This suite proves the Socket.io Redis adapter actually fans broadcasts out
 // across *separate* Node processes/servers, not just sockets within one
@@ -59,9 +72,11 @@ async function stopInstance(instance) {
 }
 
 describeIfRedis('Socket.io Redis adapter (cross-instance pub/sub)', () => {
-  let instanceA, instanceB;
+  let instanceA, instanceB, mongod;
 
   beforeAll(async () => {
+    mongod = await MongoMemoryServer.create();
+    await mongoose.connect(mongod.getUri());
     [instanceA, instanceB] = await Promise.all([startInstance(), startInstance()]);
     // Sanity check: both instances actually attached a real adapter, not the in-memory default.
     expect(instanceA.redisClients).not.toBeNull();
@@ -70,12 +85,16 @@ describeIfRedis('Socket.io Redis adapter (cross-instance pub/sub)', () => {
 
   afterAll(async () => {
     await Promise.all([stopInstance(instanceA), stopInstance(instanceB)]);
+    await mongoose.disconnect();
+    await mongod.stop();
   });
 
   it('delivers presence:update from a client on instance A to a client on instance B', async () => {
-    const roomId = `redis-room-${Date.now()}`;
-    const clientOnB = await connect(instanceB.port, makeToken({ id: 'u1', username: 'onB' }));
-    const clientOnA = await connect(instanceA.port, makeToken({ id: 'u2', username: 'onA' }));
+    const idB = new mongoose.Types.ObjectId().toString();
+    const idA = new mongoose.Types.ObjectId().toString();
+    const roomId = await makeBranch([idB, idA]);
+    const clientOnB = await connect(instanceB.port, makeToken({ id: idB, username: 'onB' }));
+    const clientOnA = await connect(instanceA.port, makeToken({ id: idA, username: 'onA' }));
 
     clientOnB.emit('room:join', roomId);
     await new Promise((resolve) => clientOnB.once('presence:update', resolve));
@@ -98,9 +117,11 @@ describeIfRedis('Socket.io Redis adapter (cross-instance pub/sub)', () => {
 
   it('delivers code:op broadcasts from instance A to a peer connected on instance B', async () => {
     const TextOperation = require('../src/ot/TextOperation');
-    const roomId = `redis-ot-room-${Date.now()}`;
-    const clientOnA = await connect(instanceA.port, makeToken({ id: 'u3', username: 'writer' }));
-    const clientOnB = await connect(instanceB.port, makeToken({ id: 'u4', username: 'reader' }));
+    const idWriter = new mongoose.Types.ObjectId().toString();
+    const idReader = new mongoose.Types.ObjectId().toString();
+    const roomId = await makeBranch([idWriter, idReader]);
+    const clientOnA = await connect(instanceA.port, makeToken({ id: idWriter, username: 'writer' }));
+    const clientOnB = await connect(instanceB.port, makeToken({ id: idReader, username: 'reader' }));
 
     await new Promise((resolve) => {
       clientOnA.emit('room:join', roomId);

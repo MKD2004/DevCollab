@@ -6,6 +6,7 @@ const piston = require('../services/piston');
 function registerRunEvents(io, socket) {
   socket.on('code:run', async ({ roomId, code, language }) => {
     if (typeof roomId !== 'string' || typeof code !== 'string' || typeof language !== 'string') return;
+    if (!socket.data.authorizedBranches?.has(roomId)) return;
 
     io.to(roomId).emit('code:running', {
       roomId,

@@ -11,6 +11,9 @@ process.env.NODE_ENV = 'test';
 
 const { registerPresenceEvents } = require('../src/sockets/presenceEvents');
 const { registerEditorEvents } = require('../src/sockets/editorEvents');
+const { registerRoomAuth } = require('../src/sockets/roomAuth');
+const Room = require('../src/models/Room');
+const Branch = require('../src/models/Branch');
 
 let mongod, httpServer, io, port;
 
@@ -18,6 +21,15 @@ function makeToken(payload = {}) {
   return jwt.sign({ id: 'user1', username: 'alice', ...payload }, process.env.JWT_SECRET, {
     expiresIn: '1h',
   });
+}
+
+// Creates a real Room + Branch with the given member ids, so room:join
+// authorization succeeds. Returns the branch id as a string.
+async function makeBranch(memberIds) {
+  const owner = memberIds[0];
+  const room = await Room.create({ name: 'editor test room', ownerId: owner, members: memberIds });
+  const branch = await Branch.create({ roomId: room._id, name: `b-${Date.now()}-${Math.random()}`, createdBy: owner });
+  return branch._id.toString();
 }
 
 function connect(token) {
@@ -49,6 +61,7 @@ beforeAll(async () => {
   });
 
   io.on('connection', (socket) => {
+    registerRoomAuth(io, socket);
     registerPresenceEvents(io, socket);
     registerEditorEvents(io, socket);
   });
@@ -68,20 +81,23 @@ afterAll(async () => {
 
 describe('code:change', () => {
   it('broadcasts content to other clients in the same room', async () => {
-    const tokenA = makeToken({ id: 'u1', username: 'alice' });
-    const tokenB = makeToken({ id: 'u2', username: 'bob' });
+    const idA = new mongoose.Types.ObjectId().toString();
+    const idB = new mongoose.Types.ObjectId().toString();
+    const tokenA = makeToken({ id: idA, username: 'alice' });
+    const tokenB = makeToken({ id: idB, username: 'bob' });
     const socketA = await connect(tokenA);
     const socketB = await connect(tokenB);
+    const roomId = await makeBranch([idA, idB]);
 
     await new Promise((resolve) => {
-      socketB.emit('room:join', 'room-1');
-      socketA.emit('room:join', 'room-1');
+      socketB.emit('room:join', roomId);
+      socketA.emit('room:join', roomId);
       setTimeout(resolve, 50);
     });
 
     const received = await new Promise((resolve) => {
       socketB.on('code:change', resolve);
-      socketA.emit('code:change', { roomId: 'room-1', content: 'hello world', language: 'javascript' });
+      socketA.emit('code:change', { roomId, content: 'hello world', language: 'javascript' });
     });
 
     expect(received.content).toBe('hello world');
@@ -91,17 +107,19 @@ describe('code:change', () => {
   });
 
   it('does not echo back to the sender', async () => {
-    const token = makeToken({ id: 'u3', username: 'carol' });
+    const idC = new mongoose.Types.ObjectId().toString();
+    const token = makeToken({ id: idC, username: 'carol' });
     const socket = await connect(token);
+    const roomId = await makeBranch([idC]);
 
     await new Promise((resolve) => {
-      socket.emit('room:join', 'room-2');
+      socket.emit('room:join', roomId);
       setTimeout(resolve, 50);
     });
 
     let echoed = false;
     socket.on('code:change', () => { echoed = true; });
-    socket.emit('code:change', { roomId: 'room-2', content: 'no echo', language: 'python' });
+    socket.emit('code:change', { roomId, content: 'no echo', language: 'python' });
 
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(echoed).toBe(false);
@@ -121,38 +139,43 @@ describe('code:change', () => {
 
 describe('code:sync', () => {
   it('sends current room state to a late joiner', async () => {
-    const tokenA = makeToken({ id: 'u5', username: 'eve' });
-    const tokenB = makeToken({ id: 'u6', username: 'frank' });
+    const idE = new mongoose.Types.ObjectId().toString();
+    const idF = new mongoose.Types.ObjectId().toString();
+    const tokenA = makeToken({ id: idE, username: 'eve' });
+    const tokenB = makeToken({ id: idF, username: 'frank' });
     const socketA = await connect(tokenA);
+    const roomId = await makeBranch([idE, idF]);
 
     await new Promise((resolve) => {
-      socketA.emit('room:join', 'room-3');
+      socketA.emit('room:join', roomId);
       setTimeout(resolve, 50);
     });
 
-    socketA.emit('code:change', { roomId: 'room-3', content: 'synced content', language: 'typescript' });
+    socketA.emit('code:change', { roomId, content: 'synced content', language: 'typescript' });
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     const socketB = await connect(tokenB);
     const sync = await new Promise((resolve) => {
       socketB.on('code:sync', resolve);
-      socketB.emit('room:join', 'room-3');
+      socketB.emit('room:join', roomId);
     });
 
     expect(sync.content).toBe('synced content');
     expect(sync.language).toBe('typescript');
-    expect(sync.roomId).toBe('room-3');
+    expect(sync.roomId).toBe(roomId);
     socketA.disconnect();
     socketB.disconnect();
   });
 
   it('sends nothing to first joiner (no prior state)', async () => {
-    const token = makeToken({ id: 'u7', username: 'grace' });
+    const idG = new mongoose.Types.ObjectId().toString();
+    const token = makeToken({ id: idG, username: 'grace' });
     const socket = await connect(token);
+    const roomId = await makeBranch([idG]);
 
     let synced = false;
     socket.on('code:sync', () => { synced = true; });
-    socket.emit('room:join', 'room-4-fresh');
+    socket.emit('room:join', roomId);
 
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(synced).toBe(false);
@@ -164,23 +187,26 @@ describe('code:sync', () => {
 
 describe('cursor:move', () => {
   it('broadcasts cursor position to others in the room', async () => {
-    const tokenA = makeToken({ id: 'u8', username: 'henry' });
-    const tokenB = makeToken({ id: 'u9', username: 'iris' });
+    const idH = new mongoose.Types.ObjectId().toString();
+    const idI = new mongoose.Types.ObjectId().toString();
+    const tokenA = makeToken({ id: idH, username: 'henry' });
+    const tokenB = makeToken({ id: idI, username: 'iris' });
     const socketA = await connect(tokenA);
     const socketB = await connect(tokenB);
+    const roomId = await makeBranch([idH, idI]);
 
     await new Promise((resolve) => {
-      socketA.emit('room:join', 'cursor-room-1');
-      socketB.emit('room:join', 'cursor-room-1');
+      socketA.emit('room:join', roomId);
+      socketB.emit('room:join', roomId);
       setTimeout(resolve, 50);
     });
 
     const received = await new Promise((resolve) => {
       socketB.on('cursor:move', resolve);
-      socketA.emit('cursor:move', { roomId: 'cursor-room-1', position: { lineNumber: 3, column: 7 } });
+      socketA.emit('cursor:move', { roomId, position: { lineNumber: 3, column: 7 } });
     });
 
-    expect(received.userId).toBe('u8');
+    expect(received.userId).toBe(idH);
     expect(received.username).toBe('henry');
     expect(received.position).toEqual({ lineNumber: 3, column: 7 });
     socketA.disconnect();
@@ -188,17 +214,19 @@ describe('cursor:move', () => {
   });
 
   it('does not echo cursor back to sender', async () => {
-    const token = makeToken({ id: 'u10', username: 'jack' });
+    const idJ = new mongoose.Types.ObjectId().toString();
+    const token = makeToken({ id: idJ, username: 'jack' });
     const socket = await connect(token);
+    const roomId = await makeBranch([idJ]);
 
     await new Promise((resolve) => {
-      socket.emit('room:join', 'cursor-room-2');
+      socket.emit('room:join', roomId);
       setTimeout(resolve, 50);
     });
 
     let echoed = false;
     socket.on('cursor:move', () => { echoed = true; });
-    socket.emit('cursor:move', { roomId: 'cursor-room-2', position: { lineNumber: 1, column: 1 } });
+    socket.emit('cursor:move', { roomId, position: { lineNumber: 1, column: 1 } });
 
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(echoed).toBe(false);
@@ -206,14 +234,17 @@ describe('cursor:move', () => {
   });
 
   it('emits cursor:leave to peers when a socket disconnects', async () => {
-    const tokenA = makeToken({ id: 'u11', username: 'kate' });
-    const tokenB = makeToken({ id: 'u12', username: 'liam' });
+    const idK = new mongoose.Types.ObjectId().toString();
+    const idL = new mongoose.Types.ObjectId().toString();
+    const tokenA = makeToken({ id: idK, username: 'kate' });
+    const tokenB = makeToken({ id: idL, username: 'liam' });
     const socketA = await connect(tokenA);
     const socketB = await connect(tokenB);
+    const roomId = await makeBranch([idK, idL]);
 
     await new Promise((resolve) => {
-      socketA.emit('room:join', 'cursor-room-3');
-      socketB.emit('room:join', 'cursor-room-3');
+      socketA.emit('room:join', roomId);
+      socketB.emit('room:join', roomId);
       setTimeout(resolve, 50);
     });
 
@@ -222,7 +253,7 @@ describe('cursor:move', () => {
       socketA.disconnect();
     });
 
-    expect(leave.userId).toBe('u11');
+    expect(leave.userId).toBe(idK);
     socketB.disconnect();
   });
 });

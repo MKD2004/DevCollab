@@ -10,7 +10,9 @@ process.env.JWT_EXPIRES_IN = '1h';
 process.env.NODE_ENV = 'test';
 
 const { registerChatEvents } = require('../src/sockets/chatEvents');
+const { registerRoomAuth } = require('../src/sockets/roomAuth');
 const Message = require('../src/models/Message');
+const Room = require('../src/models/Room');
 
 let httpServer, io, port, mongod;
 
@@ -20,6 +22,13 @@ function makeToken(payload = {}) {
   return jwt.sign({ ...payload, id, username: payload.username ?? 'alice' }, process.env.JWT_SECRET, {
     expiresIn: '1h',
   });
+}
+
+// Creates a real Room with the given member ids, so chat:join authorization
+// succeeds. Returns the room id as a string.
+async function makeRoom(memberIds) {
+  const room = await Room.create({ name: 'chat test room', ownerId: memberIds[0], members: memberIds });
+  return room._id.toString();
 }
 
 function connect(token) {
@@ -51,6 +60,7 @@ beforeAll(async () => {
   });
 
   io.on('connection', (socket) => {
+    registerRoomAuth(io, socket);
     registerChatEvents(io, socket);
   });
 
@@ -71,12 +81,36 @@ afterEach(async () => {
   }
 });
 
+describe('chat:join authorization', () => {
+  it('rejects chat:join for a non-member and drops chat:message for an unjoined room', async () => {
+    const memberId = new mongoose.Types.ObjectId().toString();
+    const outsiderId = new mongoose.Types.ObjectId().toString();
+    const roomId = await makeRoom([memberId]);
+
+    const outsider = await connect(makeToken({ id: outsiderId, username: 'mallory' }));
+
+    const errorPromise = new Promise((resolve) => outsider.once('chat:error', resolve));
+    outsider.emit('chat:join', roomId);
+    const error = await errorPromise;
+    expect(error.roomId).toBe(roomId);
+
+    let stored = null;
+    outsider.emit('chat:message', { roomId, text: 'sneaky' });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    stored = await Message.find({ roomId });
+    expect(stored).toHaveLength(0);
+
+    outsider.disconnect();
+  });
+});
+
 describe('chat:message', () => {
   it('persists the message and broadcasts it to everyone in the chat room', async () => {
     const aliceId = new mongoose.Types.ObjectId().toString();
+    const bobId = new mongoose.Types.ObjectId().toString();
     const socketA = await connect(makeToken({ id: aliceId, username: 'alice' }));
-    const socketB = await connect(makeToken({ username: 'bob' }));
-    const roomId = new mongoose.Types.ObjectId().toString();
+    const socketB = await connect(makeToken({ id: bobId, username: 'bob' }));
+    const roomId = await makeRoom([aliceId, bobId]);
 
     await new Promise((resolve) => {
       socketA.emit('chat:join', roomId);
@@ -104,8 +138,9 @@ describe('chat:message', () => {
   });
 
   it('trims whitespace and ignores empty messages', async () => {
-    const socket = await connect(makeToken({ username: 'carol' }));
-    const roomId = new mongoose.Types.ObjectId().toString();
+    const carolId = new mongoose.Types.ObjectId().toString();
+    const socket = await connect(makeToken({ id: carolId, username: 'carol' }));
+    const roomId = await makeRoom([carolId]);
 
     await new Promise((resolve) => {
       socket.emit('chat:join', roomId);
@@ -127,10 +162,12 @@ describe('chat:message', () => {
   });
 
   it('does not broadcast to sockets in a different chat room', async () => {
-    const socketA = await connect(makeToken({ username: 'dave' }));
-    const socketB = await connect(makeToken({ username: 'erin' }));
-    const roomA = new mongoose.Types.ObjectId().toString();
-    const roomB = new mongoose.Types.ObjectId().toString();
+    const daveId = new mongoose.Types.ObjectId().toString();
+    const erinId = new mongoose.Types.ObjectId().toString();
+    const socketA = await connect(makeToken({ id: daveId, username: 'dave' }));
+    const socketB = await connect(makeToken({ id: erinId, username: 'erin' }));
+    const roomA = await makeRoom([daveId]);
+    const roomB = await makeRoom([erinId]);
 
     await new Promise((resolve) => {
       socketA.emit('chat:join', roomA);
@@ -153,9 +190,11 @@ describe('chat:message', () => {
   });
 
   it('stops receiving after chat:leave', async () => {
-    const socketA = await connect(makeToken({ username: 'frank' }));
-    const socketB = await connect(makeToken({ username: 'gina' }));
-    const roomId = new mongoose.Types.ObjectId().toString();
+    const frankId = new mongoose.Types.ObjectId().toString();
+    const ginaId = new mongoose.Types.ObjectId().toString();
+    const socketA = await connect(makeToken({ id: frankId, username: 'frank' }));
+    const socketB = await connect(makeToken({ id: ginaId, username: 'gina' }));
+    const roomId = await makeRoom([frankId, ginaId]);
 
     await new Promise((resolve) => {
       socketA.emit('chat:join', roomId);

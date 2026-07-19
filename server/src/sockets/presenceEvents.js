@@ -7,24 +7,24 @@ function getPresenceList(roomId) {
   return Array.from(room.values());
 }
 
-function registerPresenceEvents(io, socket) {
+// Called by roomAuth once a `room:join` has been authorized and the socket
+// has already joined the Socket.io room for `roomId`.
+function handleBranchJoin(io, socket, roomId) {
   const { id: userId, username } = socket.data.user;
 
-  socket.on('room:join', (roomId) => {
-    socket.join(roomId);
+  if (!roomPresence.has(roomId)) roomPresence.set(roomId, new Map());
+  roomPresence.get(roomId).set(socket.id, { userId, username });
 
-    if (!roomPresence.has(roomId)) roomPresence.set(roomId, new Map());
-    roomPresence.get(roomId).set(socket.id, { userId, username });
+  if (!socket.data.rooms) socket.data.rooms = new Set();
+  socket.data.rooms.add(roomId);
 
-    if (!socket.data.rooms) socket.data.rooms = new Set();
-    socket.data.rooms.add(roomId);
-
-    io.to(roomId).emit('presence:update', {
-      roomId,
-      users: getPresenceList(roomId),
-    });
+  io.to(roomId).emit('presence:update', {
+    roomId,
+    users: getPresenceList(roomId),
   });
+}
 
+function registerPresenceEvents(io, socket) {
   socket.on('room:leave', (roomId) => {
     socket.leave(roomId);
 
@@ -61,4 +61,4 @@ function registerPresenceEvents(io, socket) {
   });
 }
 
-module.exports = { registerPresenceEvents };
+module.exports = { registerPresenceEvents, handleBranchJoin };

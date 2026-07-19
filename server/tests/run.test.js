@@ -2,6 +2,8 @@ const http = require('http');
 const { Server } = require('socket.io');
 const { io: ioc } = require('socket.io-client');
 const jwt = require('jsonwebtoken');
+const { MongoMemoryServer } = require('mongodb-memory-server');
+const mongoose = require('mongoose');
 
 process.env.JWT_SECRET = 'test-secret-key-for-jest';
 process.env.JWT_EXPIRES_IN = '1h';
@@ -10,13 +12,25 @@ process.env.NODE_ENV = 'test';
 jest.mock('../src/services/piston');
 const piston = require('../src/services/piston');
 const { registerRunEvents } = require('../src/sockets/runEvents');
+const { registerRoomAuth } = require('../src/sockets/roomAuth');
+const Room = require('../src/models/Room');
+const Branch = require('../src/models/Branch');
 
-let httpServer, io, port;
+let mongod, httpServer, io, port;
 
 function makeToken(payload = {}) {
   return jwt.sign({ id: 'user1', username: 'alice', ...payload }, process.env.JWT_SECRET, {
     expiresIn: '1h',
   });
+}
+
+// Creates a real Room + Branch with the given member ids, so room:join
+// authorization succeeds. Returns the branch id as a string.
+async function makeBranch(memberIds) {
+  const owner = memberIds[0];
+  const room = await Room.create({ name: 'run test room', ownerId: owner, members: memberIds });
+  const branch = await Branch.create({ roomId: room._id, name: `b-${Date.now()}-${Math.random()}`, createdBy: owner });
+  return branch._id.toString();
 }
 
 function connect(token) {
@@ -32,6 +46,9 @@ function connect(token) {
 }
 
 beforeAll(async () => {
+  mongod = await MongoMemoryServer.create();
+  await mongoose.connect(mongod.getUri());
+
   httpServer = http.createServer();
   io = new Server(httpServer, { cors: { origin: '*' } });
 
@@ -45,7 +62,7 @@ beforeAll(async () => {
   });
 
   io.on('connection', (socket) => {
-    socket.on('room:join', (roomId) => socket.join(roomId));
+    registerRoomAuth(io, socket);
     registerRunEvents(io, socket);
   });
 
@@ -56,19 +73,42 @@ beforeAll(async () => {
 afterAll(async () => {
   io.close();
   await new Promise((resolve) => httpServer.close(resolve));
+  await mongoose.disconnect();
+  await mongod.stop();
 });
 
 afterEach(() => {
   jest.clearAllMocks();
 });
 
+describe('code:run authorization', () => {
+  it('drops code:run for a branch the socket never joined/was authorized for', async () => {
+    const memberId = new mongoose.Types.ObjectId().toString();
+    const outsiderId = new mongoose.Types.ObjectId().toString();
+    const roomId = await makeBranch([memberId]);
+    const outsider = await connect(makeToken({ id: outsiderId, username: 'mallory' }));
+
+    let sawRunning = false;
+    outsider.on('code:running', () => { sawRunning = true; });
+    outsider.emit('code:run', { roomId, code: 'x', language: 'javascript' });
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(sawRunning).toBe(false);
+    expect(piston.executeCode).not.toHaveBeenCalled();
+
+    outsider.disconnect();
+  });
+});
+
 describe('code:run', () => {
   it('broadcasts code:running then code:result to everyone in the branch room', async () => {
     piston.executeCode.mockResolvedValue({ stdout: 'hi\n', stderr: '', exitCode: 0, compileOutput: '' });
 
-    const socketA = await connect(makeToken({ id: 'u1', username: 'alice' }));
-    const socketB = await connect(makeToken({ id: 'u2', username: 'bob' }));
-    const roomId = 'run-room-1';
+    const idA = new mongoose.Types.ObjectId().toString();
+    const idB = new mongoose.Types.ObjectId().toString();
+    const socketA = await connect(makeToken({ id: idA, username: 'alice' }));
+    const socketB = await connect(makeToken({ id: idB, username: 'bob' }));
+    const roomId = await makeBranch([idA, idB]);
 
     await new Promise((resolve) => {
       socketA.emit('room:join', roomId);
@@ -86,7 +126,7 @@ describe('code:run', () => {
     const [running, result] = await Promise.all([runningOnB, resultOnB]);
     await Promise.all([runningOnA, resultOnA]);
 
-    expect(running).toMatchObject({ roomId, userId: 'u1', username: 'alice' });
+    expect(running).toMatchObject({ roomId, userId: idA, username: 'alice' });
     expect(result).toMatchObject({ roomId, stdout: 'hi\n', stderr: '', exitCode: 0, ranBy: 'alice' });
     expect(piston.executeCode).toHaveBeenCalledWith({ language: 'python', code: 'print("hi")' });
 
@@ -97,8 +137,9 @@ describe('code:run', () => {
   it('emits code:error when Piston execution fails, without a code:result', async () => {
     piston.executeCode.mockRejectedValue(new Error('boom'));
 
-    const socket = await connect(makeToken({ id: 'u3', username: 'carol' }));
-    const roomId = 'run-room-2';
+    const idC = new mongoose.Types.ObjectId().toString();
+    const socket = await connect(makeToken({ id: idC, username: 'carol' }));
+    const roomId = await makeBranch([idC]);
 
     await new Promise((resolve) => {
       socket.emit('room:join', roomId);
@@ -121,12 +162,16 @@ describe('code:run', () => {
   it('does not broadcast to sockets in a different branch room', async () => {
     piston.executeCode.mockResolvedValue({ stdout: 'ok', stderr: '', exitCode: 0, compileOutput: '' });
 
-    const socketA = await connect(makeToken({ id: 'u4', username: 'dave' }));
-    const socketB = await connect(makeToken({ id: 'u5', username: 'erin' }));
+    const idD = new mongoose.Types.ObjectId().toString();
+    const idE = new mongoose.Types.ObjectId().toString();
+    const socketA = await connect(makeToken({ id: idD, username: 'dave' }));
+    const socketB = await connect(makeToken({ id: idE, username: 'erin' }));
+    const roomA = await makeBranch([idD]);
+    const roomB = await makeBranch([idE]);
 
     await new Promise((resolve) => {
-      socketA.emit('room:join', 'run-room-3a');
-      socketB.emit('room:join', 'run-room-3b');
+      socketA.emit('room:join', roomA);
+      socketB.emit('room:join', roomB);
       setTimeout(resolve, 50);
     });
 
@@ -135,7 +180,7 @@ describe('code:run', () => {
     socketB.on('code:result', () => { bReceived = true; });
 
     const resultOnA = new Promise((resolve) => socketA.once('code:result', resolve));
-    socketA.emit('code:run', { roomId: 'run-room-3a', code: 'x', language: 'javascript' });
+    socketA.emit('code:run', { roomId: roomA, code: 'x', language: 'javascript' });
     await resultOnA;
 
     await new Promise((resolve) => setTimeout(resolve, 100));

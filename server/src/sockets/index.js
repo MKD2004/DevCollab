@@ -5,6 +5,7 @@ const { registerPresenceEvents } = require('./presenceEvents');
 const { registerEditorEvents } = require('./editorEvents');
 const { registerRunEvents } = require('./runEvents');
 const { registerChatEvents } = require('./chatEvents');
+const { registerRoomAuth } = require('./roomAuth');
 const { createRedisClients } = require('../config/redis');
 
 // Attaches the Redis pub/sub adapter to `io` so that io.to(room).emit(...)
@@ -38,6 +39,7 @@ function createSocketServer(httpServer) {
   });
 
   io.on('connection', (socket) => {
+    registerRoomAuth(io, socket);
     registerPresenceEvents(io, socket);
     registerEditorEvents(io, socket);
     registerRunEvents(io, socket);

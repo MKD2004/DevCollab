@@ -1,27 +1,12 @@
 const Message = require('../models/Message');
+const { chatRoom } = require('./roomAuth');
 
 const MAX_TEXT_LENGTH = 2000;
 
-// Chat is scoped to the whole DevCollab room (not per-branch), so it uses
-// its own socket.io room namespace — prefixed to avoid any collision with
-// the branch ids used for presence/OT/run.
-function chatRoom(roomId) {
-  return `chat:${roomId}`;
-}
-
 function registerChatEvents(io, socket) {
-  socket.on('chat:join', (roomId) => {
-    if (typeof roomId !== 'string') return;
-    socket.join(chatRoom(roomId));
-  });
-
-  socket.on('chat:leave', (roomId) => {
-    if (typeof roomId !== 'string') return;
-    socket.leave(chatRoom(roomId));
-  });
-
   socket.on('chat:message', async ({ roomId, text }) => {
     if (typeof roomId !== 'string' || typeof text !== 'string') return;
+    if (!socket.data.authorizedChatRooms?.has(roomId)) return;
     const trimmed = text.trim();
     if (!trimmed || trimmed.length > MAX_TEXT_LENGTH) return;
 
