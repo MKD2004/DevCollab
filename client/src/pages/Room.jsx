@@ -2,14 +2,17 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth.jsx';
 import { useSocket } from '../hooks/useSocket.js';
-import { getRoom } from '../api/rooms';
+import { getRoom, previewRoom } from '../api/rooms';
 import { listBranches, createBranch } from '../api/branches';
 import { getMessages } from '../api/messages';
+import { requestToJoin, listJoinRequests, acceptJoinRequest, declineJoinRequest } from '../api/joinRequests';
 import MonacoEditor, { DEFAULT_CODE } from '../components/editor/MonacoEditor';
 import BranchTabs from '../components/editor/BranchTabs';
 import OutputPanel from '../components/editor/OutputPanel';
 import PresenceList from '../components/presence/PresenceList';
 import ChatPanel from '../components/chat/ChatPanel';
+import JoinRequestsPanel from '../components/room/JoinRequestsPanel';
+import RequestToJoinScreen from '../components/room/RequestToJoinScreen';
 import { TextOperation } from '../ot/TextOperation';
 import { OTClient } from '../ot/OTClient';
 
@@ -78,6 +81,10 @@ export default function Room() {
 
   const [room, setRoom] = useState(null);
   const [loadError, setLoadError] = useState('');
+  // Non-null while the requester isn't (yet) a member: { roomName, status }
+  // where status is 'idle' | 'sending' | 'pending' | 'declined'.
+  const [joinAccess, setJoinAccess] = useState(null);
+  const [joinRequests, setJoinRequests] = useState([]); // owner-only, pending requests
   const [branches, setBranches] = useState([]);
   const [currentBranchId, setCurrentBranchId] = useState(null);
   const [presenceUsers, setPresenceUsers] = useState([]);
@@ -88,7 +95,9 @@ export default function Room() {
   const [runState, setRunState] = useState('idle'); // 'idle' | 'running'
   const [runOutput, setRunOutput] = useState(null);
   const [messages, setMessages] = useState([]);
-  const [sidebarTab, setSidebarTab] = useState('people'); // 'people' | 'chat'
+  const [sidebarTab, setSidebarTab] = useState('people'); // 'people' | 'chat' | 'requests'
+
+  const isOwner = Boolean(room && user && String(room.ownerId?._id ?? room.ownerId) === String(user._id ?? user.id));
 
   const editorRef = useRef(null);
   const isRemote = useRef(false);
@@ -145,16 +154,29 @@ export default function Room() {
     setTimeout(() => setCodeCopied(false), 2000);
   }, [room]);
 
-  // Fetch room metadata (requester must already be a member — join via a
-  // join code on the Dashboard first) and its branch list.
-  useEffect(() => {
+  // Fetches room metadata + branch list + chat history. Requester must
+  // already be a member (join via a join code, or have a join request
+  // accepted) — a 403 here shows the request-to-join screen instead of a
+  // dead end. Re-run manually once a pending request gets accepted (see
+  // the join-request:resolved socket listener below), since the initial
+  // 403 skipped branches/messages too.
+  const loadRoomData = useCallback(() => {
     getRoom(roomId)
-      .then((res) => setRoom(res.data.room))
+      .then((res) => {
+        setRoom(res.data.room);
+        setJoinAccess(null);
+      })
       .catch((err) => {
         const status = err.response?.status;
-        if (status === 404) setLoadError('Room not found.');
-        else if (status === 403) setLoadError("You're not a member of this room. Ask for the join code.");
-        else setLoadError('Failed to load room.');
+        if (status === 404) {
+          setLoadError('Room not found.');
+        } else if (status === 403) {
+          previewRoom(roomId)
+            .then((res) => setJoinAccess((prev) => ({ roomName: res.data.room.name, status: prev?.status ?? 'idle' })))
+            .catch(() => setLoadError('Room not found.'));
+        } else {
+          setLoadError('Failed to load room.');
+        }
       });
 
     listBranches(roomId)
@@ -164,7 +186,10 @@ export default function Room() {
         const defaultBranch = list.find((b) => b.isDefault) ?? list[0];
         if (defaultBranch) setCurrentBranchId(defaultBranch._id);
       })
-      .catch(() => setLoadError('Failed to load branches.'));
+      .catch(() => {
+        // Best-effort — a non-member's failed branches fetch is expected
+        // and handled by the join-access screen above, not a fatal error.
+      });
 
     getMessages(roomId)
       .then((res) => setMessages(res.data.messages))
@@ -172,6 +197,81 @@ export default function Room() {
         // Best-effort — chat simply starts empty if history fails to load.
       });
   }, [roomId]);
+
+  useEffect(() => {
+    loadRoomData();
+  }, [loadRoomData]);
+
+  // Owner-only: load pending join requests once the room itself has loaded.
+  useEffect(() => {
+    if (!isOwner) return;
+    listJoinRequests(roomId)
+      .then((res) => setJoinRequests(res.data.requests))
+      .catch(() => {});
+  }, [isOwner, roomId]);
+
+  // Account-level notifications — not scoped to the current branch, and
+  // work even before the requester is a room member (the server reaches
+  // every authenticated connection via a personal `user:<id>` socket room,
+  // independent of the room/branch membership gate used everywhere else).
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket || !connected) return;
+
+    const handleCreated = (data) => {
+      if (data.roomId !== roomId) return;
+      setJoinRequests((prev) => [...prev, { _id: data.requestId, username: data.username }]);
+    };
+    const handleResolved = (data) => {
+      if (data.roomId !== roomId) return;
+      if (data.status === 'accepted') {
+        loadRoomData();
+      } else {
+        setJoinAccess((prev) => (prev ? { ...prev, status: 'declined' } : prev));
+      }
+    };
+
+    socket.on('join-request:created', handleCreated);
+    socket.on('join-request:resolved', handleResolved);
+    return () => {
+      socket.off('join-request:created', handleCreated);
+      socket.off('join-request:resolved', handleResolved);
+    };
+  }, [socketRef, connected, roomId, loadRoomData]);
+
+  const handleRequestToJoin = useCallback(async () => {
+    setJoinAccess((prev) => prev && { ...prev, status: 'sending' });
+    try {
+      await requestToJoin(roomId);
+      setJoinAccess((prev) => prev && { ...prev, status: 'pending' });
+    } catch {
+      setJoinAccess((prev) => prev && { ...prev, status: 'idle' });
+    }
+  }, [roomId]);
+
+  const handleAcceptRequest = useCallback(
+    async (requestId) => {
+      try {
+        await acceptJoinRequest(roomId, requestId);
+        setJoinRequests((prev) => prev.filter((r) => r._id !== requestId));
+      } catch {
+        // Best-effort — request simply stays in the pending list to retry.
+      }
+    },
+    [roomId],
+  );
+
+  const handleDeclineRequest = useCallback(
+    async (requestId) => {
+      try {
+        await declineJoinRequest(roomId, requestId);
+        setJoinRequests((prev) => prev.filter((r) => r._id !== requestId));
+      } catch {
+        // Best-effort — request simply stays in the pending list to retry.
+      }
+    },
+    [roomId],
+  );
 
   const handleCreateBranch = useCallback(
     async (name) => {
@@ -410,6 +510,17 @@ export default function Room() {
     );
   }
 
+  if (joinAccess) {
+    return (
+      <RequestToJoinScreen
+        roomName={joinAccess.roomName}
+        status={joinAccess.status}
+        onRequest={handleRequestToJoin}
+        onBack={() => navigate('/')}
+      />
+    );
+  }
+
   return (
     <div className="flex flex-col h-screen bg-gray-950 text-white">
       {/* Navbar */}
@@ -501,12 +612,30 @@ export default function Room() {
             >
               Chat
             </button>
+            {isOwner && (
+              <button
+                onClick={() => setSidebarTab('requests')}
+                className={`flex-1 px-4 py-3 text-xs font-semibold uppercase tracking-wider transition-colors ${
+                  sidebarTab === 'requests'
+                    ? 'text-white border-b-2 border-indigo-500'
+                    : 'text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                Requests{joinRequests.length > 0 && ` (${joinRequests.length})`}
+              </button>
+            )}
           </div>
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-            {sidebarTab === 'people' ? (
-              <PresenceList users={presenceUsers} />
-            ) : (
+            {sidebarTab === 'people' && <PresenceList users={presenceUsers} />}
+            {sidebarTab === 'chat' && (
               <ChatPanel messages={messages} currentUsername={user?.username} onSend={handleSendMessage} />
+            )}
+            {sidebarTab === 'requests' && isOwner && (
+              <JoinRequestsPanel
+                requests={joinRequests}
+                onAccept={handleAcceptRequest}
+                onDecline={handleDeclineRequest}
+              />
             )}
           </div>
         </aside>
