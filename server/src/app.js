@@ -1,14 +1,28 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const authRoutes = require('./routes/auth.routes');
 const roomsRoutes = require('./routes/rooms.routes');
 const branchesRoutes = require('./routes/branches.routes');
 const messagesRoutes = require('./routes/messages.routes');
+const { corsOptions } = require('./config/cors');
 
 const app = express();
 
-app.use(cors());
+// contentSecurityPolicy/COEP are meant for HTML pages — this is a pure JSON
+// API with no HTML responses, so they're disabled to avoid interfering with
+// the cross-origin frontend rather than protecting anything real here.
+// crossOriginResourcePolicy defaults to 'same-origin', which browsers
+// enforce independently of the Access-Control-Allow-Origin header above —
+// left at the default, it would silently block the frontend (a different
+// origin, especially once deployed) from reading any response at all.
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+}));
+app.use(cors(corsOptions));
 app.use(express.json());
 
 app.use('/api/auth', authRoutes);

@@ -7,6 +7,7 @@ const { registerRunEvents } = require('./runEvents');
 const { registerChatEvents } = require('./chatEvents');
 const { registerRoomAuth } = require('./roomAuth');
 const { createRedisClients } = require('../config/redis');
+const { allowedOrigins } = require('../config/cors');
 
 // Attaches the Redis pub/sub adapter to `io` so that io.to(room).emit(...)
 // fans out across multiple Node processes, not just sockets on this one.
@@ -21,7 +22,7 @@ async function attachRedisAdapter(io) {
 
 function createSocketServer(httpServer) {
   const io = new Server(httpServer, {
-    cors: { origin: '*', methods: ['GET', 'POST'] },
+    cors: { origin: allowedOrigins, methods: ['GET', 'POST'] },
   });
 
   // JWT auth middleware — runs before connection is established
