@@ -26,9 +26,75 @@ function injectCursorCSS() {
       background: ${color}; color: #fff; font-size: 10px; font-family: sans-serif;
       padding: 1px 4px; border-radius: 3px; margin-left: 2px;
       white-space: nowrap; pointer-events: none; line-height: 1.4;
+    }
+    /* Merged bar+label, used where the caret and the label have to share a
+       single injected-text slot (end of line / empty line — see cursorRange).
+       The white left edge stands in for the separate caret bar. */
+    .rcu-m${i} {
+      background: ${color}; color: #fff; font-size: 10px; font-family: sans-serif;
+      padding: 1px 4px; border-radius: 3px; border-left: 2px solid rgba(255,255,255,0.9);
+      white-space: nowrap; pointer-events: none; line-height: 1.4;
     }`,
   ).join('');
   document.head.appendChild(style);
+}
+
+/**
+ * Picks a range that Monaco will actually paint injected text on, for a remote
+ * cursor at `position`.
+ *
+ * Monaco clamps decoration ranges to real document positions and then silently
+ * drops `before`/`after` injected text on anything that ends up collapsed
+ * (zero-width). A naive [column, column + 1] range therefore renders nothing
+ * whenever the cursor sits at end-of-line or on an empty line — i.e. most of
+ * the time while someone is actually typing. Measured behaviour:
+ *
+ *   mid-line   [col, col+1]            -> renders
+ *   end-of-line[maxCol, maxCol+1]      -> clamps to collapsed, DROPPED
+ *   end-of-line[maxCol-1, maxCol]      -> renders
+ *   empty line [1, 2]                  -> clamps to collapsed, DROPPED
+ *   empty line [line 1 -> line+1 col 1]-> renders
+ *
+ * Returns `{ range, mode }`, where mode says which injected-text slot lines up
+ * with the true cursor position: 'split' (before = caret, after = label),
+ * 'after' (range runs backwards into the previous character, so only the end
+ * is on the cursor), or 'before' (range runs forward onto the next line, so
+ * only the start is on the cursor). Returns null if there's nowhere valid.
+ */
+function cursorRange(model, position) {
+  const lineCount = model.getLineCount();
+  const lineNumber = Math.min(Math.max(position.lineNumber, 1), lineCount);
+  const maxColumn = model.getLineMaxColumn(lineNumber);
+  const column = Math.min(Math.max(position.column, 1), maxColumn);
+
+  if (column < maxColumn) {
+    // Room to the right — the ordinary case.
+    return {
+      mode: 'split',
+      range: { startLineNumber: lineNumber, startColumn: column, endLineNumber: lineNumber, endColumn: column + 1 },
+    };
+  }
+
+  if (maxColumn > 1) {
+    // End of a non-empty line: extend backwards over the last character, so
+    // the range end (not its start) is what sits on the cursor.
+    return {
+      mode: 'after',
+      range: { startLineNumber: lineNumber, startColumn: maxColumn - 1, endLineNumber: lineNumber, endColumn: maxColumn },
+    };
+  }
+
+  if (lineNumber < lineCount) {
+    // Empty line: the only non-collapsed range available spans the newline
+    // into the next line, so anchor on the range start.
+    return {
+      mode: 'before',
+      range: { startLineNumber: lineNumber, startColumn: 1, endLineNumber: lineNumber + 1, endColumn: 1 },
+    };
+  }
+
+  // Empty final line — no character and no following line to span into.
+  return null;
 }
 
 export const DEFAULT_CODE = `// Welcome to DevCollab
@@ -78,24 +144,29 @@ export default function MonacoEditor({
   const applyDecorations = () => {
     const editor = internalRef.current;
     const cursors = remoteCursorsRef.current;
-    if (!editor || !cursors) return;
+    const model = editor?.getModel();
+    if (!editor || !model || !cursors) return;
 
     const newDecorations = [];
     cursors.forEach(({ username, position }) => {
       const idx = colorIdx(username);
+      const spec = cursorRange(model, position);
+      if (!spec) return; // nowhere valid to anchor this cursor
       newDecorations.push({
-        // Monaco silently drops `before`/`after` injected text on a collapsed
-        // (zero-width) range, so the range must span at least one column.
-        range: {
-          startLineNumber: position.lineNumber,
-          startColumn: position.column,
-          endLineNumber: position.lineNumber,
-          endColumn: position.column + 1,
-        },
+        range: spec.range,
         options: {
           description: `cursor-${username}`,
-          before: { content: '⁠', inlineClassName: `rcu-c${idx}` },
-          after: { content: username, inlineClassName: `rcu-l${idx}` },
+          // `before` paints at the range start, `after` at the range end —
+          // so only the slot that coincides with the real cursor position
+          // may be used. See cursorRange for which that is.
+          ...(spec.mode === 'split'
+            ? {
+                before: { content: '⁠', inlineClassName: `rcu-c${idx}` },
+                after: { content: username, inlineClassName: `rcu-l${idx}` },
+              }
+            : spec.mode === 'after'
+              ? { after: { content: username, inlineClassName: `rcu-m${idx}` } }
+              : { before: { content: username, inlineClassName: `rcu-m${idx}` } }),
         },
       });
     });
@@ -112,15 +183,19 @@ export default function MonacoEditor({
       onCursorChangeRef.current?.({ lineNumber: e.position.lineNumber, column: e.position.column });
     });
 
-    // editor.setValue() / executeEdits() (used to apply incoming code:sync/
-    // code:op content) drop every decoration on the model, so remote cursor
-    // markers must be reapplied after any content change. Also forward the
-    // raw event (with e.changes) up so Room.jsx can build an OT operation
-    // from it — Monaco doesn't distinguish local keystrokes from
-    // programmatic edits here, so the parent is responsible for ignoring
-    // changes it triggered itself (via an isRemote-style guard).
+    // editor.setValue() (used by Room.jsx's pushCurrentContentToEditor on
+    // code:sync) drops every decoration on the model, so remote cursor
+    // markers must be reapplied after any content change. NEVER clear
+    // decorationsRef here: deltaDecorations only removes the ids it is
+    // *given*, so blanking the ref makes every reapply an insert-only call
+    // and cursor markers pile up forever (one extra label per keystroke).
+    // Passing already-removed ids back in is harmless — Monaco ignores ids
+    // that are no longer on the model.
+    // Also forward the raw event (with e.changes) up so Room.jsx can build
+    // an OT operation from it — Monaco doesn't distinguish local keystrokes
+    // from programmatic edits here, so the parent is responsible for
+    // ignoring changes it triggered itself (via an isRemote-style guard).
     editor.onDidChangeModelContent((e) => {
-      decorationsRef.current = [];
       applyDecorations();
       onLocalChangeRef.current?.(e);
     });
