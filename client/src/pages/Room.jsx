@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth.jsx';
 import { useSocket } from '../hooks/useSocket.js';
-import { getRoom, previewRoom } from '../api/rooms';
+import { getRoom, previewRoom, promoteAdmin, demoteAdmin, leaveRoom } from '../api/rooms';
 import { listBranches, createBranch, renameBranch } from '../api/branches';
 import { getMessages } from '../api/messages';
 import { requestToJoin, listJoinRequests, acceptJoinRequest, declineJoinRequest } from '../api/joinRequests';
@@ -96,8 +96,15 @@ export default function Room() {
   const [runOutput, setRunOutput] = useState(null);
   const [messages, setMessages] = useState([]);
   const [sidebarTab, setSidebarTab] = useState('people'); // 'people' | 'chat' | 'requests'
+  const [leavingRoom, setLeavingRoom] = useState(false); // toggles the leave-room confirmation panel
+  const [transferTo, setTransferTo] = useState(''); // selected admin userId, owner-leave flow only
+  const [leaveError, setLeaveError] = useState('');
 
-  const isOwner = Boolean(room && user && String(room.ownerId?._id ?? room.ownerId) === String(user._id ?? user.id));
+  const currentUserId = String(user?._id ?? user?.id ?? '');
+  const isOwner = Boolean(room && currentUserId && String(room.ownerId?._id ?? room.ownerId) === currentUserId);
+  const isAdmin = Boolean(
+    room && currentUserId && (room.admins ?? []).some((a) => String(a._id ?? a) === currentUserId),
+  );
 
   const editorRef = useRef(null);
   const isRemote = useRef(false);
@@ -202,13 +209,13 @@ export default function Room() {
     loadRoomData();
   }, [loadRoomData]);
 
-  // Owner-only: load pending join requests once the room itself has loaded.
+  // Owner or admin: load pending join requests once the room itself has loaded.
   useEffect(() => {
-    if (!isOwner) return;
+    if (!isOwner && !isAdmin) return;
     listJoinRequests(roomId)
       .then((res) => setJoinRequests(res.data.requests))
       .catch(() => {});
-  }, [isOwner, roomId]);
+  }, [isOwner, isAdmin, roomId]);
 
   // Account-level notifications — not scoped to the current branch, and
   // work even before the requester is a room member (the server reaches
@@ -272,6 +279,46 @@ export default function Room() {
     },
     [roomId],
   );
+
+  const handlePromote = useCallback(
+    async (userId) => {
+      try {
+        await promoteAdmin(roomId, userId);
+        loadRoomData(); // re-fetch so the new admin's populated username shows immediately
+      } catch {
+        // Best-effort — member simply stays a plain member.
+      }
+    },
+    [roomId, loadRoomData],
+  );
+
+  const handleDemote = useCallback(
+    async (userId) => {
+      try {
+        await demoteAdmin(roomId, userId);
+        setRoom((prev) =>
+          prev ? { ...prev, admins: prev.admins.filter((a) => String(a._id ?? a) !== userId) } : prev,
+        );
+      } catch {
+        // Best-effort — admin simply stays an admin.
+      }
+    },
+    [roomId],
+  );
+
+  const handleLeaveRoom = useCallback(async () => {
+    setLeaveError('');
+    if (isOwner && !transferTo) {
+      setLeaveError('Choose who becomes the new owner.');
+      return;
+    }
+    try {
+      await leaveRoom(roomId, isOwner ? transferTo : undefined);
+      navigate('/');
+    } catch (err) {
+      setLeaveError(err.response?.data?.message || 'Failed to leave the room');
+    }
+  }, [roomId, isOwner, transferTo, navigate]);
 
   const handleCreateBranch = useCallback(
     async (name) => {
@@ -565,6 +612,61 @@ export default function Room() {
             {connected ? 'Connected' : 'Connecting…'}
           </span>
           <span className="text-sm text-gray-400 font-medium">{user?.username}</span>
+          <div className="relative">
+            <button
+              onClick={() => {
+                setLeaveError('');
+                setLeavingRoom((v) => !v);
+              }}
+              className="text-sm text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition-colors"
+            >
+              Leave Room
+            </button>
+            {leavingRoom && (
+              <div className="absolute right-0 top-full mt-2 w-64 bg-gray-900 border border-gray-700 rounded-lg shadow-xl p-3 z-10">
+                {isOwner ? (
+                  (room?.admins ?? []).length === 0 ? (
+                    <p className="text-xs text-gray-400">
+                      Promote a member to admin first — there's no one to hand ownership to.
+                    </p>
+                  ) : (
+                    <>
+                      <p className="text-xs text-gray-400 mb-2">Transfer ownership to:</p>
+                      <select
+                        value={transferTo}
+                        onChange={(e) => setTransferTo(e.target.value)}
+                        className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white mb-2"
+                      >
+                        <option value="">Select an admin…</option>
+                        {room.admins.map((a) => (
+                          <option key={a._id} value={a._id}>
+                            {a.username}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={handleLeaveRoom}
+                        className="w-full text-sm bg-rose-700 hover:bg-rose-600 text-white px-3 py-1.5 rounded-lg transition-colors"
+                      >
+                        Transfer &amp; Leave
+                      </button>
+                    </>
+                  )
+                ) : (
+                  <>
+                    <p className="text-xs text-gray-400 mb-2">Leave this room?</p>
+                    <button
+                      onClick={handleLeaveRoom}
+                      className="w-full text-sm bg-rose-700 hover:bg-rose-600 text-white px-3 py-1.5 rounded-lg transition-colors"
+                    >
+                      Leave
+                    </button>
+                  </>
+                )}
+                {leaveError && <p className="text-xs text-rose-400 mt-2">{leaveError}</p>}
+              </div>
+            )}
+          </div>
           <button
             onClick={logout}
             className="text-sm text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition-colors"
@@ -626,7 +728,7 @@ export default function Room() {
             >
               Chat
             </button>
-            {isOwner && (
+            {(isOwner || isAdmin) && (
               <button
                 onClick={() => setSidebarTab('requests')}
                 className={`flex-1 px-4 py-3 text-xs font-semibold uppercase tracking-wider transition-colors ${
@@ -640,11 +742,21 @@ export default function Room() {
             )}
           </div>
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-            {sidebarTab === 'people' && <PresenceList users={presenceUsers} />}
+            {sidebarTab === 'people' && (
+              <PresenceList
+                members={room?.members ?? []}
+                ownerId={String(room?.ownerId?._id ?? room?.ownerId ?? '')}
+                adminIds={new Set((room?.admins ?? []).map((a) => String(a._id ?? a)))}
+                onlineUserIds={new Set(presenceUsers.map((u) => u.userId))}
+                isOwner={isOwner}
+                onPromote={handlePromote}
+                onDemote={handleDemote}
+              />
+            )}
             {sidebarTab === 'chat' && (
               <ChatPanel messages={messages} currentUsername={user?.username} onSend={handleSendMessage} />
             )}
-            {sidebarTab === 'requests' && isOwner && (
+            {sidebarTab === 'requests' && (isOwner || isAdmin) && (
               <JoinRequestsPanel
                 requests={joinRequests}
                 onAccept={handleAcceptRequest}
