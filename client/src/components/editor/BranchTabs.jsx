@@ -43,7 +43,7 @@ export default function BranchTabs({ branches, currentBranchId, onSwitch, onCrea
                 onChange={(e) => setRenameValue(e.target.value)}
                 onBlur={submitRename}
                 onKeyDown={(e) => e.key === 'Escape' && setRenamingId(null)}
-                className="font-mono text-xs tracking-widest bg-gray-800 border border-indigo-500 rounded px-2 py-0.5 text-white focus:outline-none w-24"
+                className="font-mono text-xs tracking-widest bg-secondary border border-primary rounded px-2 py-0.5 text-foreground focus:outline-none w-24"
               />
             </form>
           );
@@ -57,8 +57,8 @@ export default function BranchTabs({ branches, currentBranchId, onSwitch, onCrea
             title="Double-click to rename"
             className={`font-mono text-xs tracking-widest px-2 py-0.5 rounded border transition-colors ${
               active
-                ? 'bg-indigo-600 text-white border-indigo-500'
-                : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700 hover:text-gray-200'
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'bg-secondary text-muted-foreground border-border hover:bg-secondary/70 hover:text-foreground'
             }`}
           >
             {b.name}
@@ -74,14 +74,14 @@ export default function BranchTabs({ branches, currentBranchId, onSwitch, onCrea
             onChange={(e) => setName(e.target.value)}
             onBlur={() => !name && setCreating(false)}
             placeholder="branch name"
-            className="bg-gray-800 border border-gray-700 rounded px-2 py-0.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 w-28"
+            className="bg-secondary border border-border rounded px-2 py-0.5 text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring w-28"
           />
         </form>
       ) : (
         <button
           onClick={() => setCreating(true)}
           title="New branch"
-          className="text-xs text-gray-500 hover:text-gray-300 border border-gray-700 hover:border-gray-500 rounded px-2 py-0.5 transition-colors"
+          className="text-xs text-muted-foreground hover:text-foreground border border-border hover:border-foreground/30 rounded px-2 py-0.5 transition-colors"
         >
           + branch
         </button>
