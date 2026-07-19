@@ -3,6 +3,12 @@ import Editor from '@monaco-editor/react';
 
 const LANGUAGES = ['javascript', 'typescript', 'python', 'cpp', 'java', 'go', 'rust'];
 
+// Code execution needs the Piston container, which only runs locally
+// (docker compose up -d) — it isn't hosted alongside the deployed API yet, so
+// Run would just error out there. Disabled in production builds only; local
+// dev keeps working. Placeholder until the proper "why" messaging lands.
+const RUN_UNAVAILABLE = import.meta.env.PROD;
+
 // Hex values matching PresenceList's Tailwind palette (indigo/emerald/rose/amber/sky/violet 500)
 const CURSOR_COLORS = ['#6366f1', '#10b981', '#f43f5e', '#f59e0b', '#0ea5e9', '#8b5cf6'];
 
@@ -226,8 +232,13 @@ export default function MonacoEditor({
         {branchTabsSlot}
         <button
           onClick={() => onRun?.()}
-          disabled={isRunning}
-          className="text-xs bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground font-medium px-3 py-1 rounded-lg transition-colors"
+          disabled={isRunning || RUN_UNAVAILABLE}
+          title={RUN_UNAVAILABLE ? 'Available soon' : undefined}
+          className={`text-xs font-medium px-3 py-1 rounded-lg transition-colors ${
+            RUN_UNAVAILABLE
+              ? 'bg-secondary text-muted-foreground cursor-not-allowed'
+              : 'bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground'
+          }`}
         >
           {isRunning ? 'Running…' : 'Run ▶'}
         </button>
