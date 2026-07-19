@@ -314,7 +314,7 @@ export default function Room() {
     }
     try {
       await leaveRoom(roomId, isOwner ? transferTo : undefined);
-      navigate('/');
+      navigate('/dashboard');
     } catch (err) {
       setLeaveError(err.response?.data?.message || 'Failed to leave the room');
     }
@@ -559,10 +559,10 @@ export default function Room() {
 
   if (loadError) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-950 text-white">
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
         <div className="text-center">
-          <p className="text-gray-400 mb-4">{loadError}</p>
-          <button onClick={() => navigate('/')} className="text-indigo-400 hover:underline">
+          <p className="text-muted-foreground mb-4">{loadError}</p>
+          <button onClick={() => navigate('/dashboard')} className="text-primary hover:underline">
             Back to Dashboard
           </button>
         </div>
@@ -576,29 +576,29 @@ export default function Room() {
         roomName={joinAccess.roomName}
         status={joinAccess.status}
         onRequest={handleRequestToJoin}
-        onBack={() => navigate('/')}
+        onBack={() => navigate('/dashboard')}
       />
     );
   }
 
   return (
-    <div className="flex flex-col h-screen bg-gray-950 text-white">
+    <div className="flex flex-col h-screen bg-background text-foreground">
       {/* Navbar */}
-      <header className="flex items-center justify-between px-6 py-3 bg-gray-900 border-b border-gray-800 shrink-0">
+      <header className="flex items-center justify-between px-6 py-3 bg-card border-b border-border shrink-0">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => navigate('/')}
-            className="text-gray-400 hover:text-white transition-colors"
+            onClick={() => navigate('/dashboard')}
+            className="text-muted-foreground hover:text-foreground transition-colors"
           >
             ← Rooms
           </button>
-          <span className="text-gray-600">/</span>
-          <span className="text-white font-medium">{room?.name ?? '…'}</span>
+          <span className="text-muted-foreground/40">/</span>
+          <span className="text-foreground font-medium">{room?.name ?? '…'}</span>
           {room?.joinCode && (
             <button
               onClick={copyCode}
               title="Click to copy join code"
-              className="ml-2 font-mono text-xs tracking-widest bg-gray-800 hover:bg-gray-700 border border-gray-700 text-indigo-300 px-2 py-1 rounded transition-colors"
+              className="ml-2 font-mono text-xs tracking-widest bg-secondary hover:bg-secondary/70 border border-border text-primary px-2 py-1 rounded transition-colors"
             >
               {codeCopied ? 'Copied!' : room.joinCode}
             </button>
@@ -606,36 +606,36 @@ export default function Room() {
         </div>
         <div className="flex items-center gap-4">
           <span
-            className={`flex items-center gap-1.5 text-xs ${connected ? 'text-emerald-400' : 'text-gray-500'}`}
+            className={`flex items-center gap-1.5 text-xs ${connected ? 'text-primary' : 'text-muted-foreground'}`}
           >
-            <span className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-400' : 'bg-gray-600'}`} />
+            <span className={`w-2 h-2 rounded-full ${connected ? 'bg-primary animate-pulse' : 'bg-muted-foreground/40'}`} />
             {connected ? 'Connected' : 'Connecting…'}
           </span>
-          <span className="text-sm text-gray-400 font-medium">{user?.username}</span>
+          <span className="text-sm text-muted-foreground font-medium">{user?.username}</span>
           <div className="relative">
             <button
               onClick={() => {
                 setLeaveError('');
                 setLeavingRoom((v) => !v);
               }}
-              className="text-sm text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition-colors"
+              className="text-sm text-muted-foreground hover:text-foreground border border-border hover:border-foreground/30 px-3 py-1.5 rounded-lg transition-colors"
             >
               Leave Room
             </button>
             {leavingRoom && (
-              <div className="absolute right-0 top-full mt-2 w-64 bg-gray-900 border border-gray-700 rounded-lg shadow-xl p-3 z-10">
+              <div className="absolute right-0 top-full mt-2 w-64 bg-card border border-border rounded-lg card-shadow p-3 z-10">
                 {isOwner ? (
                   (room?.admins ?? []).length === 0 ? (
-                    <p className="text-xs text-gray-400">
+                    <p className="text-xs text-muted-foreground">
                       Promote a member to admin first — there's no one to hand ownership to.
                     </p>
                   ) : (
                     <>
-                      <p className="text-xs text-gray-400 mb-2">Transfer ownership to:</p>
+                      <p className="text-xs text-muted-foreground mb-2">Transfer ownership to:</p>
                       <select
                         value={transferTo}
                         onChange={(e) => setTransferTo(e.target.value)}
-                        className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white mb-2"
+                        className="w-full bg-secondary border border-border rounded px-2 py-1.5 text-sm text-foreground mb-2"
                       >
                         <option value="">Select an admin…</option>
                         {room.admins.map((a) => (
@@ -646,7 +646,7 @@ export default function Room() {
                       </select>
                       <button
                         onClick={handleLeaveRoom}
-                        className="w-full text-sm bg-rose-700 hover:bg-rose-600 text-white px-3 py-1.5 rounded-lg transition-colors"
+                        className="w-full text-sm bg-destructive hover:bg-destructive/90 text-white px-3 py-1.5 rounded-lg transition-colors"
                       >
                         Transfer &amp; Leave
                       </button>
@@ -654,22 +654,22 @@ export default function Room() {
                   )
                 ) : (
                   <>
-                    <p className="text-xs text-gray-400 mb-2">Leave this room?</p>
+                    <p className="text-xs text-muted-foreground mb-2">Leave this room?</p>
                     <button
                       onClick={handleLeaveRoom}
-                      className="w-full text-sm bg-rose-700 hover:bg-rose-600 text-white px-3 py-1.5 rounded-lg transition-colors"
+                      className="w-full text-sm bg-destructive hover:bg-destructive/90 text-white px-3 py-1.5 rounded-lg transition-colors"
                     >
                       Leave
                     </button>
                   </>
                 )}
-                {leaveError && <p className="text-xs text-rose-400 mt-2">{leaveError}</p>}
+                {leaveError && <p className="text-xs text-destructive mt-2">{leaveError}</p>}
               </div>
             )}
           </div>
           <button
             onClick={logout}
-            className="text-sm text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition-colors"
+            className="text-sm text-muted-foreground hover:text-foreground border border-border hover:border-foreground/30 px-3 py-1.5 rounded-lg transition-colors"
           >
             Sign out
           </button>
@@ -706,14 +706,14 @@ export default function Room() {
         </div>
 
         {/* Sidebar — presence + chat */}
-        <aside className="w-72 shrink-0 bg-gray-900 border-l border-gray-800 flex flex-col">
-          <div className="flex border-b border-gray-800 shrink-0">
+        <aside className="w-72 shrink-0 bg-card border-l border-border flex flex-col">
+          <div className="flex border-b border-border shrink-0">
             <button
               onClick={() => setSidebarTab('people')}
               className={`flex-1 px-4 py-3 text-xs font-semibold uppercase tracking-wider transition-colors ${
                 sidebarTab === 'people'
-                  ? 'text-white border-b-2 border-indigo-500'
-                  : 'text-gray-500 hover:text-gray-300'
+                  ? 'text-foreground border-b-2 border-primary'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               People
@@ -722,8 +722,8 @@ export default function Room() {
               onClick={() => setSidebarTab('chat')}
               className={`flex-1 px-4 py-3 text-xs font-semibold uppercase tracking-wider transition-colors ${
                 sidebarTab === 'chat'
-                  ? 'text-white border-b-2 border-indigo-500'
-                  : 'text-gray-500 hover:text-gray-300'
+                  ? 'text-foreground border-b-2 border-primary'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               Chat
@@ -733,8 +733,8 @@ export default function Room() {
                 onClick={() => setSidebarTab('requests')}
                 className={`flex-1 px-4 py-3 text-xs font-semibold uppercase tracking-wider transition-colors ${
                   sidebarTab === 'requests'
-                    ? 'text-white border-b-2 border-indigo-500'
-                    : 'text-gray-500 hover:text-gray-300'
+                    ? 'text-foreground border-b-2 border-primary'
+                    : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
                 Requests{joinRequests.length > 0 && ` (${joinRequests.length})`}
