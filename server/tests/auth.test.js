@@ -7,6 +7,7 @@ process.env.JWT_EXPIRES_IN = '1h';
 process.env.NODE_ENV = 'test';
 
 const app = require('../src/app');
+const { extractSession, authed } = require('./helpers/session');
 
 let mongod;
 
@@ -36,13 +37,17 @@ describe('POST /api/auth/register', () => {
     password: 'password123',
   };
 
-  it('registers a new user and returns a token', async () => {
+  it('registers a new user and sets an httpOnly auth cookie', async () => {
     const res = await request(app).post('/api/auth/register').send(validUser);
     expect(res.status).toBe(201);
-    expect(res.body.token).toBeDefined();
     expect(res.body.user.email).toBe(validUser.email);
     expect(res.body.user.username).toBe(validUser.username);
     expect(res.body.user.passwordHash).toBeUndefined();
+    expect(res.body.token).toBeUndefined(); // never returned in the body
+
+    const setCookie = res.headers['set-cookie'] || [];
+    expect(setCookie.some((c) => c.startsWith('token=') && /HttpOnly/i.test(c))).toBe(true);
+    expect(setCookie.some((c) => c.startsWith('csrfToken=') && !/HttpOnly/i.test(c))).toBe(true);
   });
 
   it('rejects duplicate email', async () => {
@@ -108,11 +113,14 @@ describe('POST /api/auth/login', () => {
       .send({ username: 'loginuser', ...creds });
   });
 
-  it('logs in with correct credentials and returns a token', async () => {
+  it('logs in with correct credentials and sets an httpOnly auth cookie', async () => {
     const res = await request(app).post('/api/auth/login').send(creds);
     expect(res.status).toBe(200);
-    expect(res.body.token).toBeDefined();
     expect(res.body.user.email).toBe(creds.email);
+    expect(res.body.token).toBeUndefined();
+
+    const setCookie = res.headers['set-cookie'] || [];
+    expect(setCookie.some((c) => c.startsWith('token=') && /HttpOnly/i.test(c))).toBe(true);
   });
 
   it('rejects wrong password', async () => {
@@ -138,10 +146,75 @@ describe('POST /api/auth/login', () => {
   });
 });
 
+// ─── Logout ───────────────────────────────────────────────────────────────────
+
+describe('POST /api/auth/logout', () => {
+  it('instructs the browser to clear the auth and CSRF cookies', async () => {
+    const registerRes = await request(app).post('/api/auth/register').send({
+      username: 'logoutuser',
+      email: 'logout@example.com',
+      password: 'password123',
+    });
+    const session = extractSession(registerRes);
+
+    const logoutRes = await authed(request(app).post('/api/auth/logout'), session);
+    expect(logoutRes.status).toBe(200);
+
+    const setCookie = logoutRes.headers['set-cookie'] || [];
+    expect(setCookie.find((c) => c.startsWith('token='))).toMatch(/token=;/);
+    expect(setCookie.find((c) => c.startsWith('csrfToken='))).toMatch(/csrfToken=;/);
+  });
+});
+
+// ─── CSRF ─────────────────────────────────────────────────────────────────────
+
+describe('CSRF protection', () => {
+  it('rejects a state-changing request with a missing X-CSRF-Token header', async () => {
+    const registerRes = await request(app).post('/api/auth/register').send({
+      username: 'csrfuser1',
+      email: 'csrf1@example.com',
+      password: 'password123',
+    });
+    const session = extractSession(registerRes);
+
+    const res = await request(app)
+      .post('/api/auth/logout')
+      .set('Cookie', session.cookieHeader); // cookie present, no CSRF header
+    expect(res.status).toBe(403);
+  });
+
+  it('rejects a state-changing request with a mismatched X-CSRF-Token header', async () => {
+    const registerRes = await request(app).post('/api/auth/register').send({
+      username: 'csrfuser2',
+      email: 'csrf2@example.com',
+      password: 'password123',
+    });
+    const session = extractSession(registerRes);
+
+    const res = await request(app)
+      .post('/api/auth/logout')
+      .set('Cookie', session.cookieHeader)
+      .set('X-CSRF-Token', 'not-the-real-token');
+    expect(res.status).toBe(403);
+  });
+
+  it('accepts a state-changing request with a matching X-CSRF-Token header', async () => {
+    const registerRes = await request(app).post('/api/auth/register').send({
+      username: 'csrfuser3',
+      email: 'csrf3@example.com',
+      password: 'password123',
+    });
+    const session = extractSession(registerRes);
+
+    const res = await authed(request(app).post('/api/auth/logout'), session);
+    expect(res.status).toBe(200);
+  });
+});
+
 // ─── Protected Route ──────────────────────────────────────────────────────────
 
 describe('GET /api/auth/me', () => {
-  let token;
+  let session;
 
   beforeEach(async () => {
     const res = await request(app).post('/api/auth/register').send({
@@ -149,36 +222,25 @@ describe('GET /api/auth/me', () => {
       email: 'me@example.com',
       password: 'password123',
     });
-    token = res.body.token;
+    session = extractSession(res);
   });
 
-  it('returns user data with a valid token', async () => {
-    const res = await request(app)
-      .get('/api/auth/me')
-      .set('Authorization', `Bearer ${token}`);
+  it('returns user data with a valid session cookie', async () => {
+    const res = await request(app).get('/api/auth/me').set('Cookie', session.cookieHeader);
     expect(res.status).toBe(200);
     expect(res.body.user.email).toBe('me@example.com');
     expect(res.body.user.passwordHash).toBeUndefined();
   });
 
-  it('rejects request with no token', async () => {
+  it('rejects request with no cookie', async () => {
     const res = await request(app).get('/api/auth/me');
     expect(res.status).toBe(401);
     expect(res.body.message).toMatch(/no token/i);
   });
 
-  it('rejects request with invalid token', async () => {
-    const res = await request(app)
-      .get('/api/auth/me')
-      .set('Authorization', 'Bearer this.is.invalid');
+  it('rejects request with an invalid token cookie', async () => {
+    const res = await request(app).get('/api/auth/me').set('Cookie', 'token=this.is.invalid');
     expect(res.status).toBe(401);
     expect(res.body.message).toMatch(/invalid or expired/i);
-  });
-
-  it('rejects malformed Authorization header', async () => {
-    const res = await request(app)
-      .get('/api/auth/me')
-      .set('Authorization', 'NotBearer sometoken');
-    expect(res.status).toBe(401);
   });
 });

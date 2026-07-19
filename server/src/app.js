@@ -2,11 +2,13 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const cookieParser = require('cookie-parser');
 const authRoutes = require('./routes/auth.routes');
 const roomsRoutes = require('./routes/rooms.routes');
 const branchesRoutes = require('./routes/branches.routes');
 const messagesRoutes = require('./routes/messages.routes');
 const { corsOptions } = require('./config/cors');
+const csrfProtection = require('./middleware/csrf.middleware');
 
 const app = express();
 
@@ -22,8 +24,10 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
   crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
-app.use(cors(corsOptions));
+app.use(cors({ ...corsOptions, credentials: true }));
 app.use(express.json());
+app.use(cookieParser());
+app.use(csrfProtection);
 
 app.use('/api/auth', authRoutes);
 app.use('/api/rooms', roomsRoutes);

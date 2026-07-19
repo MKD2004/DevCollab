@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const authMiddleware = require('../middleware/auth.middleware');
 const { authLimiter } = require('../middleware/rateLimit');
+const { setAuthCookies, clearAuthCookies } = require('../config/authCookies');
 
 const router = express.Router();
 
@@ -43,8 +44,8 @@ router.post('/register', authLimiter, async (req, res) => {
     const user = await User.create({ username, email, passwordHash });
     const token = signToken(user);
 
+    setAuthCookies(res, token);
     res.status(201).json({
-      token,
       user: { id: user._id, username: user.username, email: user.email },
     });
   } catch (err) {
@@ -73,13 +74,19 @@ router.post('/login', authLimiter, async (req, res) => {
 
     const token = signToken(user);
 
+    setAuthCookies(res, token);
     res.json({
-      token,
       user: { id: user._id, username: user.username, email: user.email },
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
+});
+
+// POST /api/auth/logout
+router.post('/logout', (req, res) => {
+  clearAuthCookies(res);
+  res.json({ message: 'Logged out' });
 });
 
 // GET /api/auth/me — protected route

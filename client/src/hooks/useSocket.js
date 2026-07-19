@@ -6,11 +6,13 @@ export function useSocket() {
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-
+    // The JWT is an httpOnly cookie — withCredentials makes the browser
+    // send it automatically on the handshake instead of the client reading
+    // it. useSocket is only ever mounted under ProtectedRoute, so a
+    // connection attempt here always implies the caller is (or was) logged
+    // in; the server rejects the handshake if the cookie is missing/stale.
     const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:5000', {
-      auth: { token },
+      withCredentials: true,
       reconnectionDelay: 1000,
       reconnectionAttempts: 5,
     });

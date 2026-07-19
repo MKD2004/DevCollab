@@ -42,7 +42,8 @@ afterAll(async () => {
 
 function makeClient(token) {
   return ioc(`http://localhost:${port}`, {
-    auth: token ? { token } : {},
+    extraHeaders: token ? { Cookie: `token=${token}` } : {},
+    transports: ['websocket'],
     autoConnect: false,
     reconnection: false,
   });

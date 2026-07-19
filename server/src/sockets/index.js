@@ -1,6 +1,7 @@
 const { Server } = require('socket.io');
 const { createAdapter } = require('@socket.io/redis-adapter');
 const jwt = require('jsonwebtoken');
+const cookie = require('cookie');
 const { registerPresenceEvents } = require('./presenceEvents');
 const { registerEditorEvents } = require('./editorEvents');
 const { registerRunEvents } = require('./runEvents');
@@ -22,12 +23,16 @@ async function attachRedisAdapter(io) {
 
 function createSocketServer(httpServer) {
   const io = new Server(httpServer, {
-    cors: { origin: allowedOrigins, methods: ['GET', 'POST'] },
+    cors: { origin: allowedOrigins, methods: ['GET', 'POST'], credentials: true },
   });
 
-  // JWT auth middleware — runs before connection is established
+  // JWT auth middleware — runs before connection is established. The JWT
+  // lives in an httpOnly cookie (see config/authCookies.js), sent
+  // automatically by the browser when the client connects with
+  // withCredentials: true — never in client-readable JS/localStorage.
   io.use((socket, next) => {
-    const token = socket.handshake.auth?.token;
+    const cookies = cookie.parse(socket.handshake.headers.cookie || '');
+    const token = cookies.token;
     if (!token) return next(new Error('Authentication required'));
 
     try {

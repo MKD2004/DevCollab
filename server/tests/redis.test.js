@@ -53,7 +53,7 @@ function startInstance() {
 function connect(port, token) {
   return new Promise((resolve, reject) => {
     const socket = ioc(`http://localhost:${port}`, {
-      auth: { token },
+      extraHeaders: { Cookie: `token=${token}` },
       transports: ['websocket'],
       forceNew: true,
     });

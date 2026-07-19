@@ -20,7 +20,7 @@ export default function LoginForm() {
         mode === 'login'
           ? await loginApi({ email: form.email, password: form.password })
           : await registerApi({ username: form.username, email: form.email, password: form.password });
-      login(res.data.token, res.data.user);
+      login(res.data.user);
     } catch (err) {
       setError(err.response?.data?.message || 'Something went wrong');
     } finally {

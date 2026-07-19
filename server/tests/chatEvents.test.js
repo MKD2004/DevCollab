@@ -2,6 +2,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const { io: ioc } = require('socket.io-client');
 const jwt = require('jsonwebtoken');
+const cookie = require('cookie');
 const { MongoMemoryServer } = require('mongodb-memory-server');
 const mongoose = require('mongoose');
 
@@ -34,7 +35,7 @@ async function makeRoom(memberIds) {
 function connect(token) {
   return new Promise((resolve, reject) => {
     const socket = ioc(`http://localhost:${port}`, {
-      auth: { token },
+      extraHeaders: { Cookie: `token=${token}` },
       transports: ['websocket'],
       forceNew: true,
     });
@@ -52,7 +53,8 @@ beforeAll(async () => {
 
   io.use((socket, next) => {
     try {
-      socket.data.user = jwt.verify(socket.handshake.auth?.token, process.env.JWT_SECRET);
+      const cookies = cookie.parse(socket.handshake.headers.cookie || '');
+      socket.data.user = jwt.verify(cookies.token, process.env.JWT_SECRET);
       next();
     } catch {
       next(new Error('Unauthorized'));

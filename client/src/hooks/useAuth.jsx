@@ -1,5 +1,5 @@
 import { useState, useEffect, createContext, useContext } from 'react';
-import { getMe } from '../api/auth';
+import { getMe, logout as logoutApi } from '../api/auth';
 
 const AuthContext = createContext(null);
 
@@ -7,26 +7,24 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // The auth token is an httpOnly cookie, invisible to JS, so there's no
+  // client-readable flag to check before asking the server — /me either
+  // succeeds (cookie was valid) or 401s (no/expired cookie).
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      setLoading(false);
-      return;
-    }
     getMe()
       .then((res) => setUser(res.data.user))
-      .catch(() => localStorage.removeItem('token'))
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
-  const login = (token, userData) => {
-    localStorage.setItem('token', token);
+  const login = (userData) => {
     setUser(userData);
   };
 
   const logout = () => {
-    localStorage.removeItem('token');
-    setUser(null);
+    logoutApi()
+      .catch(() => {})
+      .finally(() => setUser(null));
   };
 
   return (
