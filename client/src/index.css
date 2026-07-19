@@ -11,33 +11,39 @@
 }
 
 :root {
-  --background: oklch(0.08 0.015 260);
-  --foreground: oklch(0.95 0.01 240);
-  --card: oklch(0.12 0.02 260);
-  --card-foreground: oklch(0.95 0.01 240);
-  --popover: oklch(0.12 0.02 260);
-  --popover-foreground: oklch(0.95 0.01 240);
-  --primary: oklch(0.7 0.18 170);
-  --primary-foreground: oklch(0.08 0.015 260);
-  --secondary: oklch(0.18 0.02 260);
-  --secondary-foreground: oklch(0.95 0.01 240);
-  --muted: oklch(0.2 0.02 260);
-  --muted-foreground: oklch(0.6 0.03 240);
-  --accent: oklch(0.65 0.15 150);
-  --accent-foreground: oklch(0.95 0.01 240);
-  --destructive: oklch(0.396 0.141 25.723);
-  --destructive-foreground: oklch(0.637 0.237 25.331);
-  --border: oklch(0.25 0.02 260);
-  --input: oklch(0.2 0.02 260);
-  --ring: oklch(0.7 0.18 170);
+  /* Raw oklch components (no oklch() wrapper) so Tailwind's opacity
+     modifiers (e.g. bg-secondary/50) can splice in an alpha channel via
+     oklch(var(--x) / <alpha-value>) — see withOpacity() in tailwind.config.js.
+     A wrapped oklch(...) value can't have opacity applied to it in Tailwind 3,
+     which silently drops any /NN utility built on top of it. */
+  --background: 0.08 0.015 260;
+  --foreground: 0.95 0.01 240;
+  --card: 0.12 0.02 260;
+  --card-foreground: 0.95 0.01 240;
+  --popover: 0.12 0.02 260;
+  --popover-foreground: 0.95 0.01 240;
+  --primary: 0.7 0.18 170;
+  --primary-foreground: 0.08 0.015 260;
+  --secondary: 0.18 0.02 260;
+  --secondary-foreground: 0.95 0.01 240;
+  --muted: 0.2 0.02 260;
+  --muted-foreground: 0.6 0.03 240;
+  --accent: 0.65 0.15 150;
+  --accent-foreground: 0.95 0.01 240;
+  --destructive: 0.396 0.141 25.723;
+  --destructive-foreground: 0.637 0.237 25.331;
+  --border: 0.25 0.02 260;
+  --input: 0.2 0.02 260;
+  --ring: 0.7 0.18 170;
   --radius: 0.75rem;
   --font-inter: 'Inter', system-ui, sans-serif;
   --font-jetbrains: 'JetBrains Mono', monospace;
   --font-geist-pixel-line: 'Geist Pixel Line', monospace;
+  color-scheme: dark;
 }
 
 * {
-  border-color: var(--border);
+  border-color: oklch(var(--border));
 }
 
 html {
@@ -46,8 +52,15 @@ html {
 
 body {
   margin: 0;
-  background-color: var(--background);
-  color: var(--foreground);
+  background-color: oklch(var(--background));
+  color: oklch(var(--foreground));
+}
+
+input,
+textarea,
+select {
+  color-scheme: dark;
+  background-color: transparent;
 }
 
 h1, h2, h3, h4, h5, h6 {
