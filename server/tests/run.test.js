@@ -98,6 +98,27 @@ describe('code:run authorization', () => {
 
     outsider.disconnect();
   });
+
+  it('drops code:run when the code payload exceeds the size cap', async () => {
+    const memberId = new mongoose.Types.ObjectId().toString();
+    const roomId = await makeBranch([memberId]);
+    const socket = await connect(makeToken({ id: memberId, username: 'alice' }));
+
+    await new Promise((resolve) => {
+      socket.emit('room:join', roomId);
+      setTimeout(resolve, 50);
+    });
+
+    let sawRunning = false;
+    socket.on('code:running', () => { sawRunning = true; });
+    socket.emit('code:run', { roomId, code: 'x'.repeat(100_001), language: 'javascript' });
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(sawRunning).toBe(false);
+    expect(piston.executeCode).not.toHaveBeenCalled();
+
+    socket.disconnect();
+  });
 });
 
 describe('code:run', () => {

@@ -5,6 +5,7 @@ const piston = require('../services/piston');
 // as fast as the socket allows and risk getting DevCollab's server IP
 // rate-limited or banned by emkc.org.
 const RUN_THROTTLE_MS = 3000;
+const MAX_CODE_LENGTH = 100_000; // generous for anything actually typed in the editor
 const lastRunAt = new Map(); // userId -> timestamp
 
 // Code execution is run-and-broadcast: whoever clicks "Run" triggers it, but
@@ -13,6 +14,7 @@ const lastRunAt = new Map(); // userId -> timestamp
 function registerRunEvents(io, socket) {
   socket.on('code:run', async ({ roomId, code, language }) => {
     if (typeof roomId !== 'string' || typeof code !== 'string' || typeof language !== 'string') return;
+    if (code.length > MAX_CODE_LENGTH) return;
     if (!socket.data.authorizedBranches?.has(roomId)) return;
 
     const userId = socket.data.user.id;
