@@ -66,7 +66,8 @@ router.get('/join/:code', async (req, res) => {
   }
 });
 
-// GET /api/rooms/:id — get a room by ID; auto-join if not already a member
+// GET /api/rooms/:id — get a room by ID; requester must already be a member.
+// Joining an unfamiliar room requires the join-code flow (GET /join/:code).
 router.get('/:id', async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
@@ -78,8 +79,7 @@ router.get('/:id', async (req, res) => {
 
     const isMember = room.members.some((m) => m.toString() === req.user.id);
     if (!isMember) {
-      room.members.push(req.user.id);
-      await room.save();
+      return res.status(403).json({ message: 'Not a member of this room' });
     }
 
     res.json({ room });

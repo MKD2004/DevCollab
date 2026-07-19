@@ -134,7 +134,7 @@ describe('GET /api/rooms/:id', () => {
     expect(res.body.room.name).toBe('Owner Room');
   });
 
-  it('auto-joins a non-member and adds them to members', async () => {
+  it('rejects a non-member with 403 and does not add them to members', async () => {
     const tokenA = await registerAndLogin('g');
     const tokenB = await registerAndLogin('h');
     const created = await createRoom(tokenA, 'Open Room');
@@ -143,13 +143,13 @@ describe('GET /api/rooms/:id', () => {
     const res = await request(app)
       .get(`/api/rooms/${roomId}`)
       .set('Authorization', `Bearer ${tokenB}`);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
 
-    // User B should now appear in the rooms list
+    // User B must still have zero rooms — no membership was granted.
     const listRes = await request(app)
       .get('/api/rooms')
       .set('Authorization', `Bearer ${tokenB}`);
-    expect(listRes.body.rooms).toHaveLength(1);
+    expect(listRes.body.rooms).toHaveLength(0);
   });
 
   it('returns 404 for nonexistent room', async () => {

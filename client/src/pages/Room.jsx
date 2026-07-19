@@ -145,13 +145,16 @@ export default function Room() {
     setTimeout(() => setCodeCopied(false), 2000);
   }, [room]);
 
-  // Fetch room metadata (auto-joins if not a member) and its branch list
+  // Fetch room metadata (requester must already be a member — join via a
+  // join code on the Dashboard first) and its branch list.
   useEffect(() => {
     getRoom(roomId)
       .then((res) => setRoom(res.data.room))
       .catch((err) => {
         const status = err.response?.status;
-        setLoadError(status === 404 ? 'Room not found.' : 'Failed to load room.');
+        if (status === 404) setLoadError('Room not found.');
+        else if (status === 403) setLoadError("You're not a member of this room. Ask for the join code.");
+        else setLoadError('Failed to load room.');
       });
 
     listBranches(roomId)
