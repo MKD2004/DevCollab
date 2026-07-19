@@ -31,6 +31,22 @@ async function loadRoomById(req, res) {
   return room;
 }
 
+// Tells the owner and every admin that a request is no longer pending, so a
+// request acted on from one place (notification card, Requests panel, another
+// admin's session) disappears everywhere instead of lingering until reload.
+function notifyHandled(io, room, request, status) {
+  if (!io) return;
+  const payload = {
+    roomId: room._id.toString(),
+    requestId: request._id.toString(),
+    username: request.username,
+    status,
+  };
+  for (const managerId of [room.ownerId, ...room.admins]) {
+    io.to(`user:${managerId}`).emit('join-request:handled', payload);
+  }
+}
+
 // POST /api/rooms/:roomId/join-requests — request to join a room you're
 // not a member of. Idempotent: re-requesting while a pending request
 // already exists just returns that same request instead of erroring.
@@ -63,6 +79,9 @@ router.post('/', joinCodeLimiter, async (req, res) => {
     if (io) {
       const payload = {
         roomId: room._id.toString(),
+        // Included so the notification can name the room without the
+        // recipient having that room's page open to look it up.
+        roomName: room.name,
         requestId: request._id.toString(),
         username: req.user.username,
       };
@@ -140,6 +159,7 @@ router.post('/:requestId/accept', async (req, res) => {
     });
     // Everyone else already viewing this room has a stale member list now.
     io?.to(chatRoom(room._id.toString())).emit('room:updated', { roomId: room._id.toString() });
+    notifyHandled(io, room, request, 'accepted');
 
     res.json({ request });
   } catch (err) {
@@ -170,10 +190,12 @@ router.post('/:requestId/decline', async (req, res) => {
     request.status = 'declined';
     await request.save();
 
-    req.app.get('io')?.to(`user:${request.userId}`).emit('join-request:resolved', {
+    const io = req.app.get('io');
+    io?.to(`user:${request.userId}`).emit('join-request:resolved', {
       roomId: room._id.toString(),
       status: 'declined',
     });
+    notifyHandled(io, room, request, 'declined');
 
     res.json({ request });
   } catch (err) {

@@ -240,11 +240,20 @@ export default function Room() {
       }
     };
 
+    // Resolved somewhere else — from the notification card, or by another
+    // admin — so drop it from this session's pending list too.
+    const handleHandled = (data) => {
+      if (data.roomId !== roomId) return;
+      setJoinRequests((prev) => prev.filter((r) => r._id !== data.requestId));
+    };
+
     socket.on('join-request:created', handleCreated);
     socket.on('join-request:resolved', handleResolved);
+    socket.on('join-request:handled', handleHandled);
     return () => {
       socket.off('join-request:created', handleCreated);
       socket.off('join-request:resolved', handleResolved);
+      socket.off('join-request:handled', handleHandled);
     };
   }, [socketRef, connected, roomId, loadRoomData]);
 
