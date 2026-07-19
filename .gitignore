@@ -62,3 +62,6 @@ desktop.ini
 context.md
 DevCollab_Project_Plan.md
 SECURITY_HARDENING.md
+
+# Reference-only design source, not part of the app
+nexus-saa-s-ai-platform/
