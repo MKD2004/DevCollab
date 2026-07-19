@@ -11,6 +11,29 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const EXEMPT_PATHS = new Set(['/api/auth/register', '/api/auth/login', '/api/health']);
 const PROTECTED_SAFE_ROUTE = /^\/api\/rooms\/join\/[^/]+$/;
 
+// A browser can legitimately hold more than one cookie of the same name --
+// changing a cookie's *attributes* (Partitioned, Domain, Path) creates a
+// separate cookie rather than replacing the existing one, and it sends them
+// all on the same request. req.cookies only exposes the first, which is not
+// necessarily the current one, so read every value straight off the raw
+// header and accept a match against any of them.
+//
+// This does not weaken the check: the client proves it can read a value the
+// server issued to it, and a cross-site attacker still can't read *any* of
+// them. Values aren't URL-decoded -- the tokens are hex, so decoding is a
+// no-op that could only throw on a malformed cookie, and a non-match just
+// fails closed.
+const CSRF_COOKIE_PREFIX = 'csrfToken=';
+
+function csrfCookieValues(req) {
+  return (req.headers.cookie || '')
+    .split(';')
+    .map((part) => part.trim())
+    .filter((part) => part.startsWith(CSRF_COOKIE_PREFIX))
+    .map((part) => part.slice(CSRF_COOKIE_PREFIX.length))
+    .filter(Boolean);
+}
+
 function csrfProtection(req, res, next) {
   if (EXEMPT_PATHS.has(req.path)) return next();
 
@@ -22,7 +45,7 @@ function csrfProtection(req, res, next) {
   if (!req.cookies?.token) return next();
 
   const header = req.headers['x-csrf-token'];
-  if (!header || header !== req.cookies.csrfToken) {
+  if (!header || !csrfCookieValues(req).includes(header)) {
     return res.status(403).json({ message: 'Invalid or missing CSRF token' });
   }
   next();

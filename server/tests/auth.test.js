@@ -209,6 +209,40 @@ describe('CSRF protection', () => {
     const res = await authed(request(app).post('/api/auth/logout'), session);
     expect(res.status).toBe(200);
   });
+
+  // Regression: a browser holding a pre-Partitioned cookie alongside the
+  // current one sends both, and the parser exposes only the first. Matching
+  // against just that value 403'd every request from an affected browser --
+  // the deployed Edge failure that prompted this.
+  it('accepts the header when a stale duplicate csrfToken cookie shadows the current one', async () => {
+    const registerRes = await request(app).post('/api/auth/register').send({
+      username: 'csrfuser4',
+      email: 'csrf4@example.com',
+      password: 'password123',
+    });
+    const session = extractSession(registerRes);
+
+    const res = await request(app)
+      .post('/api/auth/logout')
+      .set('Cookie', `csrfToken=stale-shadowing-value; ${session.cookieHeader}`)
+      .set('X-CSRF-Token', session.csrfToken);
+    expect(res.status).toBe(200);
+  });
+
+  it('still rejects a forged header when duplicate csrfToken cookies are present', async () => {
+    const registerRes = await request(app).post('/api/auth/register').send({
+      username: 'csrfuser5',
+      email: 'csrf5@example.com',
+      password: 'password123',
+    });
+    const session = extractSession(registerRes);
+
+    const res = await request(app)
+      .post('/api/auth/logout')
+      .set('Cookie', `csrfToken=stale-shadowing-value; ${session.cookieHeader}`)
+      .set('X-CSRF-Token', 'attacker-guess');
+    expect(res.status).toBe(403);
+  });
 });
 
 // ─── Protected Route ──────────────────────────────────────────────────────────
