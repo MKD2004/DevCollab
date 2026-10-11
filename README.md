@@ -16,7 +16,7 @@
 > [!NOTE]
 > **The demo's first load can take up to a minute.** The API runs on a free Render instance that sleeps when idle, and waking it takes roughly 30–60 seconds. A scheduled ping keeps it warm most of the time, but a cold start still happens.
 >
-> **Code typed into the demo is not saved permanently.** Document content lives in server memory, so it is lost whenever the API restarts or goes to sleep — see [Roadmap](#roadmap).
+> **Code typed into the demo is not saved permanently.** Document content lives in server memory, so it is lost whenever the API restarts or goes to sleep.
 >
 > **The "Run ▶" button is intentionally disabled in the demo** — it is greyed out with an *"Available soon"* tooltip, and this is deliberate rather than a bug. Code execution works fully in local development; see [Why code execution is disabled in the demo](#why-code-execution-is-disabled-in-the-demo) for the reasoning.
 
@@ -346,25 +346,6 @@ The keep-alive is **best-effort, not a guarantee** — GitHub's scheduled workfl
 
 ---
 
-## Roadmap
-
-- [x] JWT auth, rooms, presence
-- [x] Operational Transform — server, client, and full wiring
-- [x] Live cursors with per-user identity
-- [x] Branch model with per-branch documents
-- [x] Room chat and join requests
-- [x] Owner/admin roles, leave with ownership transfer
-- [x] Redis pub/sub adapter
-- [x] Security hardening pass
-- [x] Deployment
-- [ ] **Persist document content** — the text of each branch lives only in server memory (the `Branch` model stores a name, not content), so all code is lost when the API restarts, redeploys, or sleeps on the free tier. Chat, rooms, and branches themselves are saved in MongoDB; the code is not
-- [ ] **Application state in Redis** — the adapter fans out broadcasts, but presence and document state are still per-process, so the system is not yet genuinely horizontally scalable
-- [ ] **Hosted code execution** — see [above](#why-code-execution-is-disabled-in-the-demo)
-- [ ] **CI** — nothing runs the test suite on push yet
-- [ ] **Client-side tests** — all 152 tests are backend
-- [ ] **Promote-branch-to-main** — a real merge would need commit history these live documents do not have; the honest scoped version is promotion, not a pull request
-
----
 
 <div align="center">
 <sub>Built by <a href="https://github.com/MKD2004">MKD2004</a></sub>
