@@ -5,7 +5,7 @@
 **A real-time collaborative code editor with Operational Transform, branch-scoped documents, and role-based rooms.**
 
 [![Live Demo](https://img.shields.io/badge/demo-live-22c55e?style=flat-square)](https://dev-collab-hazel.vercel.app)
-[![Tests](https://img.shields.io/badge/tests-152%20passing-22c55e?style=flat-square)](#testing)
+[![Tests](https://img.shields.io/badge/tests-152-22c55e?style=flat-square)](#testing)
 
 [**Live Demo**](https://dev-collab-hazel.vercel.app) · [Architecture](#architecture) · [How OT Works](#how-operational-transform-works) · [Local Setup](#local-setup)
 
@@ -14,7 +14,9 @@
 ---
 
 > [!NOTE]
-> **The demo's first load takes a few seconds.** The API runs on a free Render instance that sleeps when idle. A scheduled ping keeps it warm most of the time, but a cold start still happens occasionally.
+> **The demo's first load can take up to a minute.** The API runs on a free Render instance that sleeps when idle, and waking it takes roughly 30–60 seconds. A scheduled ping keeps it warm most of the time, but a cold start still happens.
+>
+> **Code typed into the demo is not saved permanently.** Document content lives in server memory, so it is lost whenever the API restarts or goes to sleep — see [Roadmap](#roadmap).
 >
 > **The "Run ▶" button is intentionally disabled in the demo** — it is greyed out with an *"Available soon"* tooltip, and this is deliberate rather than a bug. Code execution works fully in local development; see [Why code execution is disabled in the demo](#why-code-execution-is-disabled-in-the-demo) for the reasoning.
 
@@ -31,7 +33,7 @@ Around that core sit the things a collaborative tool actually needs: branch-scop
 | | |
 |---|---|
 | **Conflict-free editing** | Full Operational Transform implementation — `retain`/`insert`/`delete` primitives with `apply`, `invert`, `compose`, and `transform`; client-side state machine guaranteeing at most one in-flight operation |
-| **Branch-scoped documents** | Rooms contain branches; each branch is an independent live document that can be forked from another, renamed, and switched between without cross-contamination |
+| **Branch-scoped documents** | Rooms contain branches; each branch is an independent live document that can be forked from another, renamed, and switched between without cross-contamination. Document content is held in server memory, not the database |
 | **Live presence & cursors** | Per-user colored cursors with inline username labels, plus a presence sidebar showing who is online |
 | **Role-based rooms** | Owner / admin / member, with promote–demote, leave-room, and enforced ownership transfer so a room can never be orphaned |
 | **Join requests** | Request access to a room you have no code for; owners and admins get a live, actionable accept/decline card anywhere in the app |
@@ -114,7 +116,7 @@ sequenceDiagram
 
 ### Request authorization
 
-A valid JWT alone is never sufficient. Room and branch IDs are guessable, so every socket event is checked against real database membership before it can read or mutate anything.
+A valid JWT alone is never sufficient. Room and branch IDs are guessable, so a socket must pass a real database membership check when it joins a branch or a room's chat. The result is cached on the socket, and every later event is checked against that cache before it can read or mutate anything.
 
 ```mermaid
 flowchart LR
@@ -175,7 +177,7 @@ The project went through a deliberate hardening pass. Each item below was a real
 
 ## Tech Stack
 
-**Frontend** — React 18 · Vite · Tailwind CSS · Monaco Editor · Socket.io-client · Axios · React Router
+**Frontend** — React 19 · Vite · Tailwind CSS · Monaco Editor · Socket.io-client · Axios · React Router
 
 **Backend** — Node.js 20 · Express · Socket.io · Mongoose · JWT · bcryptjs · helmet · express-rate-limit
 
@@ -251,6 +253,9 @@ npm install
 npm run dev                   # → http://localhost:5000
 ```
 
+> [!IMPORTANT]
+> `.env.example` ships with a placeholder `REDIS_URL`. If you are not using Redis, **delete that line from your `.env`** — left as-is, the server fails on startup with `Invalid URL`.
+
 **Client** — in a second terminal
 
 ```bash
@@ -279,14 +284,14 @@ Language runtimes are installed through Piston's `/api/v2/packages` endpoint rat
 | `PORT` | no | Defaults to `5000` |
 | `JWT_EXPIRES_IN` | no | Defaults to `7d` |
 | `CLIENT_ORIGIN` | no | Comma-separated allowed origins; defaults to `http://localhost:5173`. **Must be set in production or CORS silently blocks the frontend** |
-| `REDIS_URL` | no | Enables the pub/sub adapter. Managed Redis usually requires `rediss://` — plain `redis://` hangs with no useful error |
+| `REDIS_URL` | no | Enables the pub/sub adapter. Leave it out entirely when not using Redis — the server waits for Redis before it starts listening, so a wrong or dead URL stops it from starting. Managed Redis usually requires `rediss://` — plain `redis://` hangs with no useful error |
 | `PISTON_URL` | no | Defaults to the local container |
 
 **`client/.env`**
 
 | Variable | Required | Notes |
 |---|---|---|
-| `VITE_API_URL` | yes | Backend URL |
+| `VITE_API_URL` | no | Backend URL; defaults to `http://localhost:5000`. Must be set for a deployed build |
 
 ---
 
@@ -299,6 +304,8 @@ npm test
 
 **152 tests across 15 suites**, using `mongodb-memory-server` — no live database required.
 
+The Redis suite (2 tests) is the one exception: it runs against whatever `REDIS_URL` is in `server/.env`. With no `REDIS_URL` it is skipped; with a reachable one all 152 pass; with an unreachable one those 2 tests time out and fail.
+
 | Area | Coverage |
 |---|---|
 | **OT correctness** | `apply` / `invert` / `compose` behavior, revision handling, and a 200-trial randomized convergence fuzz test proving TP1 |
@@ -306,7 +313,7 @@ npm test
 | **Authorization** | Non-members rejected, forged branch IDs dropped, CSRF including duplicate-cookie shadowing |
 | **Rooms & roles** | Promote/demote, leave, owner blocked from leaving without transfer, ownership actually moves |
 | **Realtime** | Presence, cursors, chat, join notifications, run broadcasts, throttling, size caps |
-| **Infrastructure** | Cookie attribute handling; real cross-process Redis pub/sub (auto-skips when `REDIS_URL` is unset) |
+| **Infrastructure** | Cookie attribute handling; real Redis pub/sub between two separate Socket.io server instances (started inside one test process; auto-skips when `REDIS_URL` is unset) |
 
 The `e2e/` directory holds Playwright scripts that drive multiple real browser contexts against a running stack — used to catch rendering and multi-user bugs that server-side tests pass straight through. They require a global Playwright install and a running frontend and backend.
 
@@ -331,7 +338,7 @@ The intended path when it returns: detect Piston's availability server-side and 
 | Component | Platform | Notes |
 |---|---|---|
 | Client | Vercel | Auto-deploys on push; SPA rewrite so client-side routes survive a refresh |
-| API | Render | Free tier — sleeps when idle |
+| API | Render | Free tier — sleeps when idle; waking takes roughly 30–60 seconds and clears in-memory documents |
 | Database | MongoDB Atlas | Free M0 |
 | Keep-alive | GitHub Actions | Pings `/api/health` every 10 minutes |
 
@@ -350,6 +357,7 @@ The keep-alive is **best-effort, not a guarantee** — GitHub's scheduled workfl
 - [x] Redis pub/sub adapter
 - [x] Security hardening pass
 - [x] Deployment
+- [ ] **Persist document content** — the text of each branch lives only in server memory (the `Branch` model stores a name, not content), so all code is lost when the API restarts, redeploys, or sleeps on the free tier. Chat, rooms, and branches themselves are saved in MongoDB; the code is not
 - [ ] **Application state in Redis** — the adapter fans out broadcasts, but presence and document state are still per-process, so the system is not yet genuinely horizontally scalable
 - [ ] **Hosted code execution** — see [above](#why-code-execution-is-disabled-in-the-demo)
 - [ ] **CI** — nothing runs the test suite on push yet
